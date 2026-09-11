@@ -1,0 +1,59 @@
+{
+  "name": "forge-commerce-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FORGE — Autonomous Commerce Engine. Find Products. Build Offers. Create Content. Generate Sales.",
+  "engines": {
+    "node": ">=20.9"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "worker": "tsx scripts/worker.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/cli.ts migrate",
+    "db:seed": "tsx scripts/cli.ts seed",
+    "db:reset": "tsx scripts/cli.ts reset --yes",
+    "admin:create": "tsx scripts/cli.ts admin:create",
+    "forge:first-run": "tsx scripts/cli.ts first-run",
+    "jobs:drain": "tsx scripts/cli.ts jobs:drain",
+    "build:worker": "esbuild scripts/worker.ts scripts/cli.ts --bundle --platform=node --target=node20 --format=cjs --outdir=dist --out-extension:.js=.cjs --alias:@=./src --external:@electric-sql/pglite --external:pg-native",
+    "acceptance": "tsx scripts/acceptance.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.125.0",
+    "@electric-sql/pglite": "0.5.8",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans-arabic": "5.3.0",
+    "@fontsource/instrument-serif": "5.3.0",
+    "drizzle-orm": "0.45.2",
+    "lucide-react": "1.45.0",
+    "next": "16.3.5",
+    "pg": "8.23.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "^24",
+    "@types/pg": "8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "0.31.10",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.13",
+    "typescript": "^5.9.2",
+    "vitest": "5.0.0"
+  }
+}

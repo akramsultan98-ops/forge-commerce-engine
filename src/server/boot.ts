@@ -1,0 +1,41 @@
+// Server boot: migrations (embedded DB / AUTO_MIGRATE), default org + schedules + sources,
+// and the embedded job runner. Idempotent across hot reloads.
+
+import { getDb, getDbDriver } from "./db/client";
+import { runMigrations } from "./db/migrate";
+import { env } from "./env";
+import { systemContext } from "./context";
+import { logger } from "./logging/logger";
+import { ensureDefaultOrganization } from "./services/org";
+import { ensureDefaultSchedules } from "./jobs/scheduler";
+import { ensureSources } from "./discovery/service";
+import { JobRunner } from "./jobs/runner";
+
+const g = globalThis as unknown as { __forgeBoot?: Promise<void>; __forgeRunner?: JobRunner };
+
+export function bootServer(opts: { startRunner: boolean }): Promise<void> {
+  if (!g.__forgeBoot) {
+    g.__forgeBoot = (async () => {
+      const db = getDb();
+      if (getDbDriver() === "pglite" || process.env.AUTO_MIGRATE === "true") await runMigrations();
+      const org = await ensureDefaultOrganization(db);
+      await ensureDefaultSchedules(db, org.id);
+      await ensureSources(systemContext(org.id, db));
+      if (opts.startRunner && env().JOB_RUNNER === "embedded" && !g.__forgeRunner) {
+        g.__forgeRunner = new JobRunner(db, { concurrency: env().WORKER_CONCURRENCY });
+        g.__forgeRunner.start();
+      }
+      logger.info("FORGE booted", { driver: getDbDriver(), demoMode: env().DEMO_MODE, jobRunner: env().JOB_RUNNER });
+    })().catch((err) => {
+      g.__forgeBoot = undefined;
+      logger.error("FORGE boot failed", { err });
+      throw err;
+    });
+  }
+  return g.__forgeBoot;
+}
+
+/** Pages and routes await this so the embedded DB is migrated before the first query. */
+export function ensureBooted(): Promise<void> {
+  return bootServer({ startRunner: env().JOB_RUNNER === "embedded" });
+}

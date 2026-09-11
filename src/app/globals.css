@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+@custom-variant rtl (&:where([dir="rtl"], [dir="rtl"] *));
+
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-display: "Instrument Serif", ui-serif, Georgia, "Times New Roman", serif;
+  --font-arabic: "IBM Plex Sans Arabic", "Geist Variable", system-ui, sans-serif;
+
+  /* Storefront — light, editorial */
+  --color-paper: #f6f5f1;
+  --color-paper-2: #eeece6;
+  --color-paper-3: #e5e2da;
+  --color-ink: #0c0c0c;
+  --color-ink-2: #3a3935;
+  --color-muted: #6c6a64;
+  --color-line: #dcd9d1;
+  --color-ember: #d95926;
+  --color-ember-ink: #a8421a;
+
+  /* Command center — dark. Chart surface #1a1a19 is the validated data-viz surface. */
+  --color-night: #0d0d0d;
+  --color-panel: #1a1a19;
+  --color-panel-2: #222221;
+  --color-panel-3: #2a2a28;
+  --color-edge: #2c2c2a;
+  --color-edge-2: #383835;
+  --color-fog: #f4f4f1;
+  --color-haze: #c3c2b7;
+  --color-dim: #898781;
+  /* Categorical series (validated, dark) */
+  --color-s1: #3987e5;
+  --color-s2: #d95926;
+  --color-s3: #199e70;
+  --color-s7: #9085e9;
+  /* Ordinal blue ramp (funnel stages) */
+  --color-b250: #86b6ef;
+  --color-b350: #5598e7;
+  --color-b450: #2a78d6;
+  --color-b550: #1c5cab;
+  --color-b800: #10233d;
+  /* Status — reserved for state, always with icon + label */
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+
+  --animate-rise: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-fade: fade 0.6s ease both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  [dir="rtl"] body,
+  [dir="rtl"] .font-display,
+  [dir="rtl"] .font-mono {
+    font-family: var(--font-arabic);
+  }
+  [dir="rtl"] .font-display {
+    letter-spacing: 0;
+    font-weight: 600;
+  }
+  ::selection {
+    background: var(--color-ember);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-s1);
+    outline-offset: 2px;
+  }
+  .store :focus-visible {
+    outline-color: var(--color-ink);
+  }
+  summary {
+    cursor: pointer;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@utility text-balance {
+  text-wrap: balance;
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge-2) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
