@@ -1,11 +1,16 @@
 // Postgres-backed job queue. Workers claim jobs with `FOR UPDATE SKIP LOCKED`, so any number of
-// worker processes can run concurrently without double-processing. Failed jobs retry with
-// exponential backoff; jobs orphaned by a crashed worker are recovered after a lock timeout.
+// worker processes can run concurrently without double-processing. A running job is a lease: its
+// worker heartbeats the lock, completion/failure is fenced on (lockedBy, attempts) so a worker that
+// lost its lease can never overwrite the outcome, and only jobs whose worker went silent are
+// recovered. Failed jobs retry with exponential backoff.
 
-import { and, asc, desc, eq, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { jobs, type Job } from "../db/schema";
 import type { JobType } from "@/lib/constants";
+
+/** A running job's lock is refreshed every 30 s; after this long without a heartbeat its worker is presumed dead. */
+export const STALE_LOCK_MS = 5 * 60_000;
 
 export interface EnqueueOptions {
   type: JobType;
@@ -59,18 +64,27 @@ export async function claimJobs(db: Database, workerId: string, limit: number): 
     .returning();
 }
 
-export async function completeJob(db: Database, id: number, result: unknown) {
-  await db
+/** The lease a worker got from claimJobs: only the same owner on the same attempt may finish the job. */
+export type JobLease = Pick<Job, "id" | "attempts" | "lockedBy">;
+const holds = (job: JobLease) =>
+  and(eq(jobs.id, job.id), eq(jobs.status, "running"), eq(jobs.attempts, job.attempts), job.lockedBy === null ? isNull(jobs.lockedBy) : eq(jobs.lockedBy, job.lockedBy));
+
+/** Marks the job succeeded. Returns false (and changes nothing) if the lease was lost. */
+export async function completeJob(db: Database, job: JobLease, result: unknown): Promise<boolean> {
+  const rows = await db
     .update(jobs)
     .set({ status: "succeeded", result: (result ?? null) as never, finishedAt: new Date(), lockedAt: null, lockedBy: null, lastError: null })
-    .where(eq(jobs.id, id));
+    .where(holds(job))
+    .returning({ id: jobs.id });
+  return rows.length > 0;
 }
 
 export function backoffMs(attempt: number): number {
   return Math.min(60 * 60_000, 30_000 * 2 ** Math.max(0, attempt - 1));
 }
 
-export async function failJob(db: Database, job: Pick<Job, "id" | "attempts" | "maxAttempts">, error: string, retryable = true) {
+/** Fails (terminal) or re-queues with backoff. Fenced like completeJob. Returns whether the failure is final. */
+export async function failJob(db: Database, job: JobLease & Pick<Job, "maxAttempts">, error: string, retryable = true) {
   const final = !retryable || job.attempts >= job.maxAttempts;
   await db
     .update(jobs)
@@ -82,19 +96,35 @@ export async function failJob(db: Database, job: Pick<Job, "id" | "attempts" | "
       lockedAt: null,
       lockedBy: null,
     })
-    .where(eq(jobs.id, job.id));
+    .where(holds(job));
   return final;
 }
 
-/** Re-queues jobs whose worker died mid-run (lock older than `staleMs`). */
-export async function recoverStaleJobs(db: Database, staleMs = 15 * 60_000) {
-  const cutoff = new Date(Date.now() - staleMs);
+/** Refreshes the lock of jobs this worker is still running, so the stale-job reaper leaves them alone. */
+export async function heartbeatJobs(db: Database, workerId: string, ids: number[]): Promise<number> {
+  if (!ids.length) return 0;
   const rows = await db
     .update(jobs)
-    .set({ status: "queued", lockedAt: null, lockedBy: null, lastError: "Recovered after worker lock timeout" })
-    .where(and(eq(jobs.status, "running"), lt(jobs.lockedAt, cutoff)))
+    .set({ lockedAt: sql`now()` })
+    .where(and(inArray(jobs.id, ids), eq(jobs.status, "running"), eq(jobs.lockedBy, workerId)))
     .returning({ id: jobs.id });
   return rows.length;
+}
+
+/** Recovers jobs whose worker stopped heartbeating (crash, kill -9): re-queued, or failed once attempts are exhausted. */
+export async function recoverStaleJobs(db: Database, staleMs = STALE_LOCK_MS) {
+  const stale = and(eq(jobs.status, "running"), lt(jobs.lockedAt, new Date(Date.now() - staleMs)));
+  const failed = await db
+    .update(jobs)
+    .set({ status: "failed", finishedAt: new Date(), lockedAt: null, lockedBy: null, lastError: "Worker stopped responding and no attempts remain" })
+    .where(and(stale, sql`${jobs.attempts} >= ${jobs.maxAttempts}`))
+    .returning({ id: jobs.id });
+  const requeued = await db
+    .update(jobs)
+    .set({ status: "queued", runAt: new Date(), lockedAt: null, lockedBy: null, lastError: "Recovered: worker stopped responding" })
+    .where(stale)
+    .returning({ id: jobs.id });
+  return failed.length + requeued.length;
 }
 
 export async function retryJob(db: Database, id: number) {

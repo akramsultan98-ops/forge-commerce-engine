@@ -35,12 +35,13 @@ docker compose logs -f app worker
 
 - [ ] `DEMO_MODE=false` (otherwise all outbound actions stay blocked by design)
 - [ ] `AUTH_SECRET`, `ENCRYPTION_KEY` — 32 random bytes each; the app refuses to start without them
-- [ ] `APP_URL=https://…` (enables `Secure` cookies and correct OAuth/postback URLs)
+- [ ] `APP_URL=https://…` (enables `Secure` cookies and correct OAuth/postback URLs; Shopify only delivers webhooks over HTTPS)
+- [ ] `TRUSTED_PROXIES` = the reverse proxy's address only — otherwise every request appears to come from the proxy and per-IP rate limits share one bucket; never list ranges clients can reach from
 - [ ] `DATABASE_URL` to managed PostgreSQL with TLS, a least-privilege role (no superuser)
 - [ ] `JOB_RUNNER=external` on web; at least one worker running
 - [ ] AI provider key + monthly budget (Settings → AI); verify non-Anthropic prices
 - [ ] Email (`EMAIL_PROVIDER_KEY`, `EMAIL_FROM`) and/or Telegram for alerts
-- [ ] Shopify app secrets and webhooks registered to `/api/webhooks/shopify`
+- [ ] Shopify app secrets set; webhooks register automatically on OAuth connect (repeat from Admin → Shopify → *Register webhooks now*); single-token setups set `SHOPIFY_WEBHOOK_SECRET`; compliance topics declared in the app config
 - [ ] Affiliate network postback URLs generated (Affiliate → Generate postback URL)
 - [ ] `ERROR_TRACKING_DSN` (Sentry-compatible) or log shipping for the JSON logs
 - [ ] Legal pages reviewed by counsel (templates in `src/content/legal.ts`)
@@ -52,4 +53,6 @@ docker compose logs -f app worker
 - **Health** — `GET /api/health` (DB round-trip, queue depth, failed jobs in 24 h). `/admin/logs?tab=health` for details.
 - **Logs** — structured JSON on stdout (secrets redacted). Job, automation, agent, audit and API logs are in the database and visible under `/admin/logs` and `/admin/agents`.
 - **Scaling** — web is stateless except the in-memory rate limiter (per instance; see SECURITY.md).
-- **Upgrades** — build → run `migrate` → roll web and workers.
+- **Upgrades** — build → run `migrate` (applies `drizzle/*.sql` in order; `0001` moves Shopify orders to one row per line item — existing rows are converted by the next sync or webhook) → roll web and workers.
+- **Jobs** — a timed-out job is failed and never re-run automatically (its handler may not have stopped); find out why it hung, then retry it from Admin → Logs → Jobs.
+- **Account recovery** — `docker compose run --rm migrate node dist/cli.cjs admin:reset-password --email=you@example.com` prints a one-time generated password and revokes every session (`--enable` for a disabled account; `--password-stdin` with `run -T` to supply your own). Locally with PGlite: stop the dev server first (single-process), then run `npx tsx scripts/cli.ts admin:reset-password --email=you@example.com`.

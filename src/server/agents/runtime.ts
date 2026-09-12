@@ -44,6 +44,7 @@ function compact(value: unknown): unknown {
 }
 
 export async function runAgent<I, O>(ctx: ServiceContext, agent: AgentDef<I, O>, input: I, opts: RunOptions = {}): Promise<{ runId: string; output: O }> {
+  ctx.signal?.throwIfAborted();
   const started = Date.now();
   const [run] = await ctx.db
     .insert(agentRuns)
@@ -56,6 +57,8 @@ export async function runAgent<I, O>(ctx: ServiceContext, agent: AgentDef<I, O>,
     runId: run.id,
     parentRunId: opts.parentRunId ?? null,
     step: (msg, level = "info") => {
+      // Cooperative cancellation: a timed-out job stops at the agent's next step.
+      ctx.signal?.throwIfAborted();
       logs.push({ at: new Date().toISOString(), level, msg });
       ctx.log[level](`[${agent.name}] ${msg}`);
     },

@@ -9,11 +9,13 @@ import { env } from "../env";
 import { userContext, type ServiceContext } from "../context";
 import { captureException, ForbiddenError, RateLimitedError, toPublicError, UnauthorizedError } from "../errors";
 import { hashIp } from "../security/crypto";
+import { clientIpFromHeaders } from "../security/client-ip";
 import { LIMITS, rateLimit } from "../security/rate-limit";
 import { validateApiKey, validateSessionToken } from "./core";
 
+/** Client IP: the TCP peer, or X-Forwarded-For only when the peer is a trusted proxy (TRUSTED_PROXIES). */
 export function requestIp(req: NextRequest): string | null {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
+  return clientIpFromHeaders((name) => req.headers.get(name));
 }
 
 export async function authenticateRequest(req: NextRequest): Promise<ServiceContext | null> {

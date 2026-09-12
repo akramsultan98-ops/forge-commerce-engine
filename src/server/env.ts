@@ -18,6 +18,8 @@ const EnvSchema = z.object({
   AUTH_SECRET: z.string().default(""),
   ENCRYPTION_KEY: z.string().default(""),
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(14),
+  /** Comma-separated IPs / CIDR blocks / presets (loopback, private, linklocal) whose X-Forwarded-For is honoured. Empty = none. */
+  TRUSTED_PROXIES: z.string().default(""),
   JOB_RUNNER: z.enum(["embedded", "external", "off"]).default("embedded"),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().max(16).default(2),
 
@@ -35,6 +37,8 @@ const EnvSchema = z.object({
   SHOPIFY_API_VERSION: z.string().default("2026-07"),
   SHOPIFY_SHOP_DOMAIN: z.string().default(""),
   SHOPIFY_ACCESS_TOKEN: z.string().default(""),
+  /** Store-level webhook signing secret (Shopify admin → Settings → Notifications → Webhooks) for single-token setups. */
+  SHOPIFY_WEBHOOK_SECRET: z.string().default(""),
 
   TELEGRAM_BOT_TOKEN: z.string().default(""),
   TELEGRAM_CHAT_ID: z.string().default(""),

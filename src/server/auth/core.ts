@@ -7,7 +7,7 @@ import type { Database } from "../db/client";
 import { apiKeys, sessions, users, type User } from "../db/schema";
 import { randomToken, sha256Hex } from "../security/crypto";
 import { dummyVerify, hashPassword, verifyPassword } from "./password";
-import { ConflictError, ValidationError } from "../errors";
+import { ConflictError, NotFoundError, ValidationError } from "../errors";
 
 export const SESSION_SLIDE_MS = 60 * 60_000;
 
@@ -96,6 +96,24 @@ export async function createUser(db: Database, input: { organizationId: string; 
 export async function countUsers(db: Database): Promise<number> {
   const rows = await db.select({ id: users.id }).from(users).limit(1);
   return rows.length;
+}
+
+/**
+ * Account recovery (CLI: `admin:reset-password`). Sets a new password, optionally re-enables the
+ * account, and revokes every existing session so a compromised session cannot outlive the reset.
+ */
+export async function resetUserPassword(db: Database, input: { email: string; password: string; enable?: boolean }) {
+  const email = normalizeEmail(input.email);
+  if (input.password.length < 10) throw new ValidationError("Password must be at least 10 characters");
+  const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  if (!user) throw new NotFoundError("User");
+  const [updated] = await db
+    .update(users)
+    .set({ passwordHash: await hashPassword(input.password), ...(input.enable ? { disabled: false } : {}) })
+    .where(eq(users.id, user.id))
+    .returning({ id: users.id, email: users.email, role: users.role, organizationId: users.organizationId, disabled: users.disabled });
+  const revoked = await db.delete(sessions).where(eq(sessions.userId, user.id)).returning({ id: sessions.id });
+  return { ...updated, sessionsRevoked: revoked.length };
 }
 
 // ── API keys (for integrations and scripts). Format: forge_<8-char prefix>_<secret> ──

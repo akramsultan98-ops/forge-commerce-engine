@@ -7,13 +7,15 @@ import { getDb } from "../db/client";
 import { env } from "../env";
 import { userContext, type ServiceContext } from "../context";
 import { ForbiddenError, UnauthorizedError } from "../errors";
+import { clientIpFromHeaders } from "../security/client-ip";
 import { createSessionRecord, revokeSession, validateSessionToken, type SessionUser } from "./core";
 
 export const SESSION_COOKIE = "forge_session";
 
+/** Client IP for pages and Server Actions (trusted-proxy aware — see security/client-ip.ts). */
 export async function clientIp(): Promise<string | null> {
   const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || null;
+  return clientIpFromHeaders((name) => h.get(name));
 }
 
 function cookieSecure(): boolean {

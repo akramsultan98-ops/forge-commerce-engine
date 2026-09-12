@@ -11,7 +11,7 @@ import { apiKeys, users } from "@/server/db/schema";
 import { audit } from "@/server/audit";
 import { updateSchedule } from "@/server/jobs/scheduler";
 import { saveSourceConfig } from "@/server/discovery/service";
-import { beginShopifyOAuth, disconnectShopify, publishProductToShopify } from "@/server/integrations/shopify";
+import { beginShopifyOAuth, disconnectShopify, ensureShopifyWebhooks, publishProductToShopify } from "@/server/integrations/shopify";
 import { checkLink, createLink, createNetwork, rotatePostbackSecret, saveNetworkCredentials, setLinkStatus } from "@/server/services/affiliate";
 import { affiliateLinks } from "@/server/db/schema";
 import { ValidationError } from "@/server/errors";
@@ -160,6 +160,13 @@ export async function shopifyOpAction(_prev: ActionState, fd: FormData): Promise
     if (op === "publish") {
       const r = await publishProductToShopify(ctx, str(fd, "productId"));
       return `Created in Shopify as a draft (${r.gid}).`;
+    }
+    if (op === "register_webhooks") {
+      const r = await ensureShopifyWebhooks(ctx.db, ctx.orgId);
+      await audit(ctx, "shopify.webhooks_register", { type: "integration", id: "SHOPIFY" }, { created: r.created.length, existing: r.existing.length, errors: r.errors.length, skipped: r.skipped ?? null });
+      if (r.skipped) throw new ValidationError(r.skipped);
+      if (r.errors.length) throw new ValidationError(`Some webhooks could not be registered: ${r.errors.join("; ")}`);
+      return `Webhooks registered: ${r.created.length} created, ${r.existing.length} already present.`;
     }
     throw new ValidationError("Unknown operation");
   });

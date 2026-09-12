@@ -2,6 +2,8 @@
  *   migrate                      apply database migrations
  *   seed [--no-events] [--days=30]   seed labelled DEMO data (requires DEMO_MODE=true)
  *   admin:create --email=… --name=… [--password=…] [--role=admin|operator|viewer]
+ *   admin:reset-password --email=… [--password-stdin | --password=…] [--enable]
+ *                                account recovery: new password (generated if omitted), all sessions revoked
  *   first-run                    run the first-run discovery workflow now (Top 5 + launch kits)
  *   jobs:drain                   execute every queued job, then exit
  *   reset --yes                  DROP all data (refused in production)
@@ -66,6 +68,36 @@ async function main() {
         if (generated) console.log(`  generated password (shown once): ${password}`);
         break;
       }
+      case "admin:reset-password": {
+        // Account recovery for operators with shell access to the server / container.
+        await runMigrations();
+        const { resetUserPassword } = await import("../src/server/auth/core");
+        const { audit } = await import("../src/server/audit");
+        const { systemContext } = await import("../src/server/context");
+        const email = String(f.email ?? process.env.ADMIN_EMAIL ?? "");
+        if (!email || email === "true") throw new Error("--email is required");
+        let password: string;
+        let generated = false;
+        if (f["password-stdin"]) {
+          let input = "";
+          for await (const chunk of process.stdin) input += chunk;
+          password = input.replace(/\r?\n$/, "");
+        } else if (typeof f.password === "string") {
+          password = f.password;
+          console.warn("  warning: --password is visible in shell history and process lists; prefer --password-stdin or a generated password");
+        } else if (process.env.ADMIN_PASSWORD) {
+          password = process.env.ADMIN_PASSWORD;
+        } else {
+          password = crypto.randomBytes(18).toString("base64url");
+          generated = true;
+        }
+        const user = await resetUserPassword(db, { email, password, enable: f.enable === true });
+        await audit({ ...systemContext(user.organizationId, db), ip: null }, "auth.password_reset", { type: "user", id: user.id }, { via: "cli", sessionsRevoked: user.sessionsRevoked, reenabled: f.enable === true });
+        console.log(`✓ password reset for ${user.email} (${user.role}); ${user.sessionsRevoked} session(s) revoked${f.enable === true ? "; account enabled" : ""}`);
+        if (generated) console.log(`  new password (shown once — store it in a password manager): ${password}`);
+        if (user.disabled) console.log("  note: this account is disabled — re-run with --enable to allow sign-in");
+        break;
+      }
       case "first-run": {
         await runMigrations();
         const org = await ensureDefaultOrganization(db);
@@ -101,7 +133,7 @@ async function main() {
         break;
       }
       default:
-        console.log("Commands: migrate | seed | admin:create | first-run | jobs:drain | reset --yes");
+        console.log("Commands: migrate | seed | admin:create | admin:reset-password | first-run | jobs:drain | reset --yes");
         process.exitCode = command ? 1 : 0;
     }
   } finally {

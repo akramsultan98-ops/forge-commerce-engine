@@ -1,6 +1,9 @@
 export async function register() {
   // Only boot inside the Node.js server runtime, never during `next build`.
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NEXT_PHASE === "phase-production-build") return;
+  // Stamp the real TCP peer on every request before Next.js handles it (trusted-proxy IP resolution).
+  const { installPeerStamp } = await import("./server/security/client-ip");
+  installPeerStamp();
   const { bootServer } = await import("./server/boot");
   const { env } = await import("./server/env");
   await bootServer({ startRunner: env().JOB_RUNNER === "embedded" });

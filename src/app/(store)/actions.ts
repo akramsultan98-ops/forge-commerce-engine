@@ -12,6 +12,7 @@ import { resolveStorefront } from "@/server/services/org";
 import { recordEvent } from "@/server/services/tracking";
 import { LIMITS, rateLimit } from "@/server/security/rate-limit";
 import { env } from "@/server/env";
+import { clientIp } from "@/server/auth/session";
 
 const YEAR = 365 * 86400;
 const secure = () => env().APP_URL.startsWith("https://");
@@ -41,7 +42,7 @@ type State = { ok: boolean; message?: string; error?: string } | null;
 export async function subscribeAction(_prev: State, fd: FormData): Promise<State> {
   const t = makeT(await getLocale());
   const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = (await clientIp()) ?? "unknown";
   if (!rateLimit(`newsletter:${ip}`, LIMITS.newsletter.limit, LIMITS.newsletter.windowMs).ok) return { ok: false, error: t("admin.login.rateLimited") };
   if (fd.get("company")) return { ok: true, message: t("newsletter.success") }; // honeypot
   const parsed = z.string().trim().toLowerCase().email().max(254).safeParse(fd.get("email"));

@@ -13,6 +13,8 @@ export interface ServiceContext {
   actor: "user" | "system" | "api_key" | "agent";
   ip?: string | null;
   log: Logger;
+  /** Aborted when the background job doing this work times out — long-running work stops at its next step. */
+  signal?: AbortSignal;
 }
 
 export function systemContext(orgId: string, db: Database = getDb()): ServiceContext {

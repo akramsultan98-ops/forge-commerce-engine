@@ -821,11 +821,17 @@ export const orders = pgTable(
     organizationId: orgRef(),
     storeId: uuid("store_id").references(() => stores.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
-    source: text("source").notNull(), // SHOPIFY | DROPSHIP | MANUAL
+    source: text("source").notNull(), // SHOPIFY | DROPSHIP | MANUAL | DEMO
     externalOrderId: text("external_order_id"),
+    /** Shopify line-item GID — one row per line item so revenue is credited per product. '' for single-line sources. */
+    externalLineId: text("external_line_id").notNull().default(""),
+    /** PAID | PARTIALLY_REFUNDED | REFUNDED | CANCELLED | PENDING | VOIDED (see EXCLUDED_ORDER_STATUSES). */
     status: text("status").notNull().default("PAID"),
+    /** Net quantity after refunds/removals. */
     quantity: integer("quantity").notNull().default(1),
+    /** Net revenue after discounts and refunds, before tax and shipping charged. */
     revenue: money("revenue").notNull().default(0),
+    refundedAmount: money("refunded_amount").notNull().default(0),
     cost: money("cost").notNull().default(0),
     shippingCost: money("shipping_cost").notNull().default(0),
     currency: text("currency").notNull().default("USD"),
@@ -835,10 +841,13 @@ export const orders = pgTable(
     utmContent: text("utm_content"),
     isDemo: boolean("is_demo").notNull().default(false),
     occurredAt: ts("occurred_at").notNull().defaultNow(),
+    /** The source system's last-modified time; older deliveries never overwrite newer state. */
+    sourceUpdatedAt: ts("source_updated_at"),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex("orders_source_ext_uq").on(t.organizationId, t.source, t.externalOrderId).where(sql`external_order_id is not null`),
+    uniqueIndex("orders_source_ext_line_uq").on(t.organizationId, t.source, t.externalOrderId, t.externalLineId).where(sql`external_order_id is not null`),
     index("orders_org_time_idx").on(t.organizationId, t.occurredAt),
   ],
 );

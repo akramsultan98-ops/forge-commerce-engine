@@ -1,56 +1,119 @@
-// Worker: polls the queue, executes handlers with a timeout, records automation runs,
-// enqueues due cron schedules and recovers jobs orphaned by crashed workers.
+// Worker: polls the queue, executes handlers under a lease (heartbeat + fenced completion) with a
+// hard timeout, records automation runs, enqueues due cron schedules and recovers jobs orphaned by
+// crashed workers.
+//
+// Timeouts: the handler's AbortSignal fires (agents and AI calls stop at their next step), the job
+// is failed TERMINALLY — never retried automatically, because a handler that ignores the signal may
+// still be running — and any late result is discarded (fencing) and logged, never silently applied.
 
 import os from "node:os";
 import { eq } from "drizzle-orm";
-import type { JobType } from "@/lib/constants";
+import type { ServiceContext } from "../context";
 import { systemContext } from "../context";
 import type { Database } from "../db/client";
 import { automationRuns, type Job } from "../db/schema";
 import { captureException } from "../errors";
 import { logger } from "../logging/logger";
 import { ensureDefaultOrganization } from "../services/org";
-import { claimJobs, completeJob, failJob, recoverStaleJobs } from "./queue";
+import { STALE_LOCK_MS, claimJobs, completeJob, failJob, heartbeatJobs, recoverStaleJobs } from "./queue";
 import { JOB_HANDLERS } from "./handlers";
 import { enqueueDueSchedules } from "./scheduler";
 
-const JOB_TIMEOUT_MS = 20 * 60_000;
+export const JOB_TIMEOUT_MS = 20 * 60_000;
+const HEARTBEAT_MS = 30_000;
+/** After a timeout, how long to wait for the handler to honour the abort before giving up on it. */
+const ABORT_GRACE_MS = 30_000;
 
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error(`Job exceeded ${ms / 60_000} minute timeout`)), ms);
+export type JobHandler = (ctx: ServiceContext, payload: Record<string, unknown>) => Promise<unknown>;
+
+export interface ExecuteOptions {
+  timeoutMs?: number;
+  graceMs?: number;
+  heartbeatMs?: number;
+  /** Test seam: override handlers by job type. */
+  handlers?: Partial<Record<string, JobHandler>>;
+}
+
+export class JobTimeoutError extends Error {
+  constructor(ms: number) {
+    super(`Job exceeded its ${formatMs(ms)} timeout`);
+    this.name = "JobTimeoutError";
+  }
+}
+
+function formatMs(ms: number) {
+  return ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${ms} ms`;
+}
+
+type Settled<T> = { kind: "done"; value: T } | { kind: "error"; error: unknown } | { kind: "timeout" };
+function within<T>(p: Promise<T>, ms: number): Promise<Settled<T>> {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve({ kind: "timeout" }), ms);
     p.then(
-      (v) => {
+      (value) => {
         clearTimeout(t);
-        resolve(v);
+        resolve({ kind: "done", value });
       },
-      (e) => {
+      (error) => {
         clearTimeout(t);
-        reject(e);
+        resolve({ kind: "error", error });
       },
     );
   });
 }
 
-export async function executeJob(db: Database, job: Job): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+export async function executeJob(db: Database, job: Job, opts: ExecuteOptions = {}): Promise<{ ok: boolean; result?: unknown; error?: string; timedOut?: boolean }> {
+  const timeoutMs = opts.timeoutMs ?? JOB_TIMEOUT_MS;
+  const graceMs = opts.graceMs ?? ABORT_GRACE_MS;
   const orgId = job.organizationId ?? (await ensureDefaultOrganization(db)).id;
-  const ctx = systemContext(orgId, db);
+  const controller = new AbortController();
+  const ctx: ServiceContext = { ...systemContext(orgId, db), signal: controller.signal };
   const started = Date.now();
   const [run] = await db.insert(automationRuns).values({ organizationId: orgId, jobId: job.id, automation: job.type, trigger: job.trigger, status: "running" }).returning({ id: automationRuns.id });
-  const handler = JOB_HANDLERS[job.type as JobType];
+  const finishRun = (status: "succeeded" | "failed", extra: { summary?: Record<string, unknown>; error?: string }) =>
+    db.update(automationRuns).set({ status, ...extra, durationMs: Date.now() - started, finishedAt: new Date() }).where(eq(automationRuns.id, run.id));
+  const handler = (opts.handlers?.[job.type] ?? JOB_HANDLERS[job.type as keyof typeof JOB_HANDLERS]) as JobHandler | undefined;
+  // Keep the lease alive while the handler runs; stops the moment we stop waiting for it.
+  const heartbeat = job.lockedBy ? setInterval(() => void heartbeatJobs(db, job.lockedBy!, [job.id]).catch(() => undefined), opts.heartbeatMs ?? HEARTBEAT_MS) : null;
   try {
     if (!handler) throw new Error(`No handler for job type "${job.type}"`);
-    const result = await withTimeout(handler(ctx, job.payload ?? {}), JOB_TIMEOUT_MS);
-    await completeJob(db, job.id, result);
-    await db.update(automationRuns).set({ status: "succeeded", summary: (result ?? {}) as Record<string, unknown>, durationMs: Date.now() - started, finishedAt: new Date() }).where(eq(automationRuns.id, run.id));
+    const work = Promise.resolve().then(() => handler(ctx, job.payload ?? {}));
+    const outcome = await within(work, timeoutMs);
+
+    if (outcome.kind === "timeout") {
+      controller.abort(new JobTimeoutError(timeoutMs));
+      const stopped = (await within(work, graceMs)).kind !== "timeout";
+      const message = `Timed out after ${formatMs(timeoutMs)}; ${stopped ? "the handler stopped" : `the handler did not stop within ${formatMs(graceMs)} — any late result will be discarded`}. Not retried automatically: retry it manually from Admin → Logs → Jobs.`;
+      await failJob(db, job, message, false);
+      await finishRun("failed", { error: message });
+      captureException(new JobTimeoutError(timeoutMs), { jobId: job.id, type: job.type, stopped });
+      if (!stopped) {
+        work.then(
+          () => logger.warn("timed-out job finished late — result discarded", { jobId: job.id, type: job.type }),
+          (err) => logger.warn("timed-out job failed late", { jobId: job.id, type: job.type, err }),
+        );
+      }
+      return { ok: false, error: message, timedOut: true };
+    }
+    if (outcome.kind === "error") throw outcome.error;
+
+    if (!(await completeJob(db, job, outcome.value))) {
+      const message = "Lease lost before completion (the job was recovered or retried elsewhere) — result discarded";
+      logger.warn(message, { jobId: job.id, type: job.type });
+      await finishRun("failed", { error: message });
+      return { ok: false, error: message };
+    }
+    await finishRun("succeeded", { summary: (outcome.value ?? {}) as Record<string, unknown> });
     logger.info("job succeeded", { jobId: job.id, type: job.type, ms: Date.now() - started });
-    return { ok: true, result };
+    return { ok: true, result: outcome.value };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const final = await failJob(db, job, message);
-    await db.update(automationRuns).set({ status: "failed", error: message.slice(0, 4000), durationMs: Date.now() - started, finishedAt: new Date() }).where(eq(automationRuns.id, run.id));
+    await finishRun("failed", { error: message.slice(0, 4000) });
     captureException(err, { jobId: job.id, type: job.type, final });
     return { ok: false, error: message };
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
   }
 }
 
@@ -59,7 +122,7 @@ export async function drainQueue(db: Database, opts: { maxJobs?: number; workerI
   const results: Array<{ id: number; type: string; ok: boolean; error?: string }> = [];
   const max = opts.maxJobs ?? 200;
   while (results.length < max) {
-    const [job] = await claimJobs(db, opts.workerId ?? "drain", 1);
+    const [job] = await claimJobs(db, opts.workerId ?? `drain:${process.pid}`, 1);
     if (!job) break;
     const r = await executeJob(db, job);
     results.push({ id: job.id, type: job.type, ok: r.ok, error: r.error });
@@ -108,10 +171,10 @@ export class JobRunner {
         this.lastSchedule = now;
         await enqueueDueSchedules(this.db);
       }
-      if (now - this.lastRecovery > 5 * 60_000) {
+      if (now - this.lastRecovery > 60_000) {
         this.lastRecovery = now;
-        const recovered = await recoverStaleJobs(this.db, JOB_TIMEOUT_MS + 60_000);
-        if (recovered) logger.warn("recovered stale jobs", { recovered });
+        const recovered = await recoverStaleJobs(this.db, STALE_LOCK_MS);
+        if (recovered) logger.warn("recovered jobs from unresponsive workers", { recovered });
       }
       const capacity = (this.opts.concurrency ?? 2) - this.active;
       if (capacity > 0) {

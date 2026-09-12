@@ -19,6 +19,16 @@ and a campaign — as a background job.
 > `AI_INFERENCE`, `MANUAL`, `DEMO`). FORGE never fabricates sales numbers, reviews, testimonials,
 > scarcity or countdowns, never fakes an integration, and labels demo data as demo data.
 
+## Status
+
+**Local milestone closed (2026-09-12).** FORGE runs locally in Docker Compose (PostgreSQL + web +
+worker) with `DEMO_MODE=true`; typecheck, lint, 171 tests and the production build pass, and
+`/api/health` reports `ok`. No live credentials, no deployment, no domain yet.
+
+Next milestone: UI polish · product images · real integrations tested against live accounts ·
+live credentials · production deployment · domain and HTTPS. Details and the full ledger:
+[docs/STATUS.md](docs/STATUS.md).
+
 ---
 
 ## Quick start (no Docker needed)
@@ -43,7 +53,11 @@ against the embedded database (it is single-process).
 cp .env.example .env   # set AUTH_SECRET, ENCRYPTION_KEY, APP_URL, DEMO_MODE
 docker compose up -d --build
 docker compose run --rm migrate node dist/cli.cjs admin:create --email=you@example.com --name="You"
+docker compose run --rm migrate node dist/cli.cjs seed        # optional: labelled demo data
 ```
+
+Locked out? `docker compose run --rm migrate node dist/cli.cjs admin:reset-password --email=you@example.com`
+prints a one-time password and signs the account out everywhere.
 
 See [docs/SETUP.md](docs/SETUP.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 

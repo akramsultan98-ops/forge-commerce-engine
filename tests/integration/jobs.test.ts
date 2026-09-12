@@ -42,7 +42,9 @@ describe("job queue", () => {
     await claimJobs(t.db, "dead-worker", 1);
     await t.db.update(jobs).set({ lockedAt: new Date(Date.now() - 60 * 60_000) }).where(eq(jobs.id, id));
     expect(await recoverStaleJobs(t.db, 15 * 60_000)).toBeGreaterThanOrEqual(1);
-    await completeJob(t.db, id, { ok: true });
+    const [again] = await claimJobs(t.db, "w2", 1);
+    expect(again.id).toBe(id);
+    expect(await completeJob(t.db, again, { ok: true })).toBe(true);
     expect((await getJob(t.db, id))?.status).toBe("succeeded");
   });
 

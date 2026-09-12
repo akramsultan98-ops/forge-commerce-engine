@@ -17,7 +17,10 @@
 | SSRF | Operator-supplied URLs (link checks, feeds) go through `safeFetch`: http(s) only, ports 80/443, no credentials, internal hostnames refused, every resolved IP checked **at connect time** (defeats DNS rebinding), redirects re-validated, size and time limits |
 | Open redirects | `/r/{code}` only redirects to stored, validated http(s) destinations; admin `next` param restricted to `/admin` |
 | Secrets | Env vars only, validated at boot; production refuses weak `AUTH_SECRET`/`ENCRYPTION_KEY`; third-party credentials encrypted at rest with AES-256-GCM; never serialised to the browser (server modules throw if bundled client-side); secrets redacted from logs |
-| Webhooks | Shopify HMAC-SHA256 over the raw body; affiliate postback tokens compared in constant time; idempotency tables |
+| Webhooks | Shopify HMAC-SHA256 over the raw body (app secret, or a store-level secret accepted only for `SHOPIFY_SHOP_DOMAIN`), routed to the organisation connected to the sending store; affiliate postback tokens compared in constant time; idempotency tables (a failed delivery frees its slot so the retry is processed) |
+| Client IP | Every request is stamped with its real TCP peer (HMAC-signed per process, installed in `instrumentation.ts`). `X-Forwarded-For` is honoured only when that peer is in `TRUSTED_PROXIES` (IPs, CIDR blocks, `loopback` / `private` / `linklocal`), walking right-to-left past trusted hops; client-controlled entries are never used. Empty = forwarding headers ignored |
+| Account recovery | `admin:reset-password` CLI (requires shell and database access): new password, generated and shown once by default (or `--password-stdin`); every session revoked; audited without the password; `--enable` re-enables a disabled account |
+| Background jobs | Leased jobs: 30 s heartbeat, completion fenced on owner + attempt, only silent jobs recovered; a timeout aborts the handler's signal and fails the job without automatic re-run; late results are discarded |
 | OAuth | Shopify: shop-domain allow-list regex, single-use expiring `state`, HMAC verification, server-side code exchange |
 | Rate limiting | Login, API, commands, tracking, redirects, newsletter, webhooks (sliding window) |
 | Uploads | CSV only: ≤ 5 MB, extension/MIME check, row limit, strict row validation; exports neutralise spreadsheet formula injection. Assets are URL-referenced (https only) |
@@ -29,7 +32,8 @@
 ## Known limitations / next steps
 
 - The rate limiter is in-memory **per instance** — use a shared store (Redis/Postgres) behind a load balancer.
-- No 2FA, password-reset email flow or SSO yet — create/disable users as an admin.
+- No 2FA, self-service password-reset email flow or SSO yet — admins create/disable users; locked-out operators recover with `admin:reset-password`.
+- Client-IP resolution depends on `TRUSTED_PROXIES` matching the real reverse proxy; verify it once behind the production proxy (spoofed `X-Forwarded-For` must not change the logged IP).
 - API keys are organisation-wide with a role; there are no per-endpoint scopes.
 - Asset uploads are URL-based; direct file uploads would need object storage + malware scanning.
 - `style-src` allows `'unsafe-inline'` (inline style attributes used by charts); scripts are nonce-only.

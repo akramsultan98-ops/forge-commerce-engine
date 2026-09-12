@@ -5,6 +5,7 @@ import type { ServiceContext } from "../context";
 import { productMetrics } from "../db/schema";
 import { isDemoMode } from "../env";
 import { isoDate, safeDivide } from "@/lib/utils";
+import { EXCLUDED_ORDER_STATUSES } from "../integrations/shopify-orders";
 
 export interface DateRange {
   from: Date;
@@ -21,6 +22,10 @@ type Row = Record<string, unknown>;
 const rows = (r: { rows: unknown[] }) => r.rows as Row[];
 const n = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
 const demoCond = (alias: string) => (isDemoMode() ? sql`true` : sql.raw(`${alias}.is_demo = false`));
+/** Orders that are money: refunded, cancelled, pending and voided lines are excluded everywhere. */
+const paidOrder = (alias: string) => sql.raw(`${alias}.status not in (${EXCLUDED_ORDER_STATUSES.map((s) => `'${s}'`).join(",")})`);
+/** Orders are stored one row per line item — count distinct orders, not rows. */
+const orderCount = (alias: string) => sql.raw(`count(distinct coalesce(${alias}.external_order_id, ${alias}.id::text))::int`);
 
 export interface Kpis {
   pageViews: number;
@@ -62,9 +67,9 @@ export async function kpis(ctx: Pick<ServiceContext, "db" | "orgId">, range: Dat
   );
   const [od] = rows(
     await ctx.db.execute(sql`
-      select count(*)::int as orders, coalesce(sum(revenue), 0)::float8 as revenue, coalesce(sum(cost + shipping_cost), 0)::float8 as cost
+      select ${orderCount("o")} as orders, coalesce(sum(revenue), 0)::float8 as revenue, coalesce(sum(cost + shipping_cost), 0)::float8 as cost
       from orders o
-      where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and o.status not in ('REFUNDED','CANCELLED') and ${demoCond("o")}`),
+      where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and ${paidOrder("o")} and ${demoCond("o")}`),
   );
   const [sp] = rows(
     await ctx.db.execute(sql`
@@ -128,8 +133,8 @@ export async function timeseries(ctx: Pick<ServiceContext, "db" | "orgId">, rang
   );
   const od = rows(
     await ctx.db.execute(sql`
-      select to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as d, count(*)::int as orders, coalesce(sum(revenue), 0)::float8 as revenue
-      from orders o where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and ${demoCond("o")} ${pf("o")} group by 1`),
+      select to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as d, ${orderCount("o")} as orders, coalesce(sum(revenue), 0)::float8 as revenue
+      from orders o where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and ${paidOrder("o")} and ${demoCond("o")} ${pf("o")} group by 1`),
   );
   const byDay = new Map<string, { date: string; views: number; clicks: number; conversions: number; revenue: number }>();
   for (let t = new Date(Date.UTC(range.from.getUTCFullYear(), range.from.getUTCMonth(), range.from.getUTCDate())); t < range.to; t = new Date(t.getTime() + 86400_000)) {
@@ -226,8 +231,8 @@ export async function leaderboard(ctx: Pick<ServiceContext, "db" | "orgId">, ran
         where organization_id = ${ctx.orgId} and occurred_at >= ${from}::timestamptz and occurred_at < ${to}::timestamptz group by product_id
       ) c on c.product_id = p.id
       left join (
-        select product_id, count(*) as n, sum(revenue) as revenue from orders
-        where organization_id = ${ctx.orgId} and occurred_at >= ${from}::timestamptz and occurred_at < ${to}::timestamptz group by product_id
+        select o.product_id, ${orderCount("o")} as n, sum(o.revenue) as revenue from orders o
+        where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and ${paidOrder("o")} group by o.product_id
       ) o on o.product_id = p.id
       where p.organization_id = ${ctx.orgId} and ${demoCond("p")}
       order by (coalesce(c.commission, 0) + coalesce(o.revenue, 0)) desc, coalesce(e.aclicks, 0) desc, p.overall_score desc nulls last
@@ -276,9 +281,9 @@ export async function attributionFunnel(ctx: Pick<ServiceContext, "db" | "orgId"
         where c.organization_id = ${ctx.orgId} and c.occurred_at >= ${range.from.toISOString()}::timestamptz and c.occurred_at < ${range.to.toISOString()}::timestamptz and ${demoCond("c")}
         group by 1
       ), od as (
-        select coalesce(${sql.raw(groupBy)}, '(direct)') as key, count(*)::int as orders, coalesce(sum(revenue), 0)::float8 as revenue
+        select coalesce(${sql.raw(groupBy)}, '(direct)') as key, ${orderCount("o")} as orders, coalesce(sum(revenue), 0)::float8 as revenue
         from orders o
-        where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${range.from.toISOString()}::timestamptz and o.occurred_at < ${range.to.toISOString()}::timestamptz and ${demoCond("o")}
+        where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${range.from.toISOString()}::timestamptz and o.occurred_at < ${range.to.toISOString()}::timestamptz and ${paidOrder("o")} and ${demoCond("o")}
         group by 1
       )
       select coalesce(ev.key, cv.key, od.key) as key, coalesce(ev.visits, 0) as visits, coalesce(ev.product_clicks, 0) as "productClicks",
@@ -322,7 +327,7 @@ export async function productStats(ctx: Pick<ServiceContext, "db" | "orgId">, pr
   );
   const [c] = rows(await ctx.db.execute(sql`select count(*)::int as n, coalesce(sum(commission), 0)::float8 as commission from conversion_events where product_id = ${productId} and occurred_at >= ${s}::timestamptz`));
   const [o] = rows(
-    await ctx.db.execute(sql`select count(*)::int as n, coalesce(sum(revenue), 0)::float8 as revenue, coalesce(sum(cost + shipping_cost), 0)::float8 as cost from orders where product_id = ${productId} and occurred_at >= ${s}::timestamptz and status not in ('REFUNDED','CANCELLED')`),
+    await ctx.db.execute(sql`select ${orderCount("o")} as n, coalesce(sum(o.revenue), 0)::float8 as revenue, coalesce(sum(o.cost + o.shipping_cost), 0)::float8 as cost from orders o where o.product_id = ${productId} and o.occurred_at >= ${s}::timestamptz and ${paidOrder("o")}`),
   );
   const [sp] = rows(await ctx.db.execute(sql`select coalesce(sum(spend), 0)::float8 as spend from campaigns where product_id = ${productId}`));
   const [m] = rows(
@@ -355,9 +360,9 @@ export async function syncProductMetrics(ctx: Pick<ServiceContext, "db" | "orgId
         (select count(*) from click_events e where e.product_id = p.id and e.event_type = 'AFFILIATE_CLICK' and e.is_bot = false and date_trunc('day', e.created_at at time zone 'UTC') = d.day)::int as aclicks,
         (select count(*) from conversion_events c where c.product_id = p.id and date_trunc('day', c.occurred_at at time zone 'UTC') = d.day)::int as conversions,
         (select coalesce(sum(commission), 0) from conversion_events c where c.product_id = p.id and date_trunc('day', c.occurred_at at time zone 'UTC') = d.day)::float8 as commission,
-        (select count(*) from orders o where o.product_id = p.id and date_trunc('day', o.occurred_at at time zone 'UTC') = d.day)::int as orders,
-        (select coalesce(sum(revenue), 0) from orders o where o.product_id = p.id and date_trunc('day', o.occurred_at at time zone 'UTC') = d.day)::float8 as revenue,
-        (select coalesce(sum(cost + shipping_cost), 0) from orders o where o.product_id = p.id and date_trunc('day', o.occurred_at at time zone 'UTC') = d.day)::float8 as cost
+        (select ${orderCount("o")} from orders o where o.product_id = p.id and ${paidOrder("o")} and date_trunc('day', o.occurred_at at time zone 'UTC') = d.day) as orders,
+        (select coalesce(sum(revenue), 0) from orders o where o.product_id = p.id and ${paidOrder("o")} and date_trunc('day', o.occurred_at at time zone 'UTC') = d.day)::float8 as revenue,
+        (select coalesce(sum(cost + shipping_cost), 0) from orders o where o.product_id = p.id and ${paidOrder("o")} and date_trunc('day', o.occurred_at at time zone 'UTC') = d.day)::float8 as cost
       from products p
       cross join (select generate_series(date_trunc('day', ${s}::timestamptz at time zone 'UTC'), date_trunc('day', now() at time zone 'UTC'), interval '1 day') as day) d
       where p.organization_id = ${ctx.orgId}`),
