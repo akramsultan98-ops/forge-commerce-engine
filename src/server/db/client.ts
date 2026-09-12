@@ -38,7 +38,8 @@ export function createDb(url: string): DbHandle {
     if (target === "memory") {
       client = new PGlite();
     } else {
-      const dir = path.resolve(process.cwd(), target);
+      // Dev/test-only embedded database path — excluded from output file tracing.
+      const dir = path.resolve(/*turbopackIgnore: true*/ process.cwd(), target);
       fs.mkdirSync(dir, { recursive: true });
       client = new PGlite(dir);
     }

@@ -25,7 +25,7 @@ export default async function CommandPage() {
           <Panel title="How commands run">
             <ol className="list-decimal space-y-2 ps-4 text-xs leading-relaxed text-haze">
               <li>A deterministic rule parser recognises the intent (free, instant).</li>
-              <li>If it can't, an AI intent model classifies it — only when an AI provider is configured.</li>
+              <li>If it can’t, an AI intent model classifies it — only when an AI provider is configured.</li>
               <li>Queries answer immediately; generation (pages, content, launch kits) is queued as a job you can watch.</li>
               <li>Viewers can ask questions; only operators and admins can start agents.</li>
             </ol>

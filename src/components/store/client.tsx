@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
@@ -21,25 +22,27 @@ export function Tracker({ productId, landingPageId, experimentId, variant }: { p
   return null;
 }
 
+const readConsentChoice = () => document.cookie.split("; ").some((c) => c.startsWith("forge_consent="));
+const noSubscription = () => () => {};
+
 export function CookieBanner({ text, accept, decline, more, onChoice }: { text: string; accept: string; decline: string; more: string; onChoice: (granted: boolean) => Promise<void> }) {
-  const [open, setOpen] = useState(false);
+  // Server snapshot = "already chosen" so SSR never renders the banner (no hydration mismatch).
+  const hasChoice = useSyncExternalStore(noSubscription, readConsentChoice, () => true);
+  const [dismissed, setDismissed] = useState(false);
   const [pending, start] = useTransition();
-  useEffect(() => {
-    setOpen(!document.cookie.split("; ").some((c) => c.startsWith("forge_consent=")));
-  }, []);
-  if (!open) return null;
+  if (hasChoice || dismissed) return null;
   const choose = (g: boolean) =>
     start(async () => {
       await onChoice(g);
-      setOpen(false);
+      setDismissed(true);
     });
   return (
     <div role="dialog" aria-live="polite" aria-label="Cookie consent" className="fixed inset-x-3 bottom-3 z-50 mx-auto max-w-2xl rounded-xl border border-line bg-paper/95 p-4 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)] backdrop-blur md:inset-x-auto md:end-6 md:bottom-6">
       <p className="text-sm leading-relaxed text-ink-2">
         {text}{" "}
-        <a href="/legal/cookies" className="underline decoration-line underline-offset-4 hover:decoration-ink">
+        <Link href="/legal/cookies" className="underline decoration-line underline-offset-4 hover:decoration-ink">
           {more}
-        </a>
+        </Link>
       </p>
       <div className="mt-3 flex gap-2">
         <button type="button" disabled={pending} onClick={() => choose(true)} className="h-9 rounded-full bg-ink px-5 text-sm text-paper transition-opacity hover:opacity-85">

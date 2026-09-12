@@ -54,10 +54,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const cur = currency.display;
   const money = (v: number, compact = false) => formatMoney(convert(v, "USD", cur, currency.rates), cur, "en", { compact });
 
-  const [k, kp, ts, board, platforms, countries, perf, opps, tests, recs, report] = await Promise.all([
+  const [k, kp, ts, tsPrev, board, platforms, countries, perf, opps, tests, recs, report] = await Promise.all([
     kpis(ctx, range),
     kpis(ctx, prevRange),
     timeseries(ctx, range),
+    timeseries(ctx, prevRange),
     leaderboard(ctx, range, 8),
     breakdown(ctx, range, "platform", 6),
     breakdown(ctx, range, "country", 6),
@@ -69,7 +70,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   ]);
   const oppScores = await latestScores(ctx, opps.items.map((p) => p.id));
   const testStats = await Promise.all(tests.map((t) => productStats(ctx, t.test.productId, t.test.startedAt)));
-  const delta = (a: number, b: number) => (b ? (a - b) / b : null);
+  // Only compare against a prior window that is actually comparable: a store that started 31 days
+  // ago has one day of data in the previous 30-day window, and "105× vs previous period" misleads.
+  const activeDays = (s: typeof ts) => s.filter((d) => d.views + d.clicks + d.conversions + d.revenue > 0).length;
+  const prevActive = activeDays(tsPrev);
+  const comparable = tsPrev.length > 0 && prevActive / tsPrev.length >= 0.5;
+  const deltaNote = prevActive > 0 && !comparable ? "prior period incomplete" : "no prior-period data";
+  const delta = (a: number, b: number) => (comparable && b ? (a - b) / b : null);
   const topContent = [...perf].sort((a, b) => b.conversions - a.conversions || b.siteVisits - a.siteVisits)[0];
   const bestCountry = [...countries].sort((a, b) => b.conversions - a.conversions || b.clicks - a.clicks)[0];
   const profitDelta = delta(k.profit, kp.profit);
@@ -80,7 +87,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     <>
       {sp.denied && (
         <Callout tone="warning" className="mb-6" title="Access denied">
-          Your role ({ctx.role}) can't open that page.
+          Your role ({ctx.role}) can’t open that page.
         </Callout>
       )}
       <PageHeader
@@ -110,12 +117,12 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       />
 
       <section aria-label="Key metrics" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Revenue" value={money(k.revenue, true)} delta={delta(k.revenue, kp.revenue)} spark={ts.map((d) => d.revenue)} hint="Owned-store revenue + affiliate commission" />
-        <StatTile label="Commission" value={money(k.commission, true)} delta={delta(k.commission, kp.commission)} />
-        <StatTile label="Profit" value={money(k.profit, true)} delta={profitDelta} hint="Commission + (order revenue − COGS − shipping) − ad spend − AI cost" />
-        <StatTile label="Orders" value={formatCompact(k.orders)} delta={delta(k.orders, kp.orders)} spark={ts.map((d) => d.conversions)} hint="Store orders + affiliate purchases" />
-        <StatTile label="Clicks" value={formatCompact(k.clicks)} delta={delta(k.clicks, kp.clicks)} spark={ts.map((d) => d.clicks)} hint="Product + affiliate clicks" />
-        <StatTile label="Conversion rate" value={formatPercent(k.conversionRate, 2)} delta={delta(k.conversionRate, kp.conversionRate)} spark={ts.map((d) => (d.views ? d.conversions / d.views : 0))} hint="Orders ÷ page views" />
+        <StatTile label="Revenue" value={money(k.revenue, true)} delta={delta(k.revenue, kp.revenue)} deltaNote={deltaNote} spark={ts.map((d) => d.revenue)} hint="Owned-store revenue + affiliate commission" />
+        <StatTile label="Commission" value={money(k.commission, true)} delta={delta(k.commission, kp.commission)} deltaNote={deltaNote} />
+        <StatTile label="Profit" value={money(k.profit, true)} delta={profitDelta} deltaNote={deltaNote} hint="Commission + (order revenue − COGS − shipping) − ad spend − AI cost" />
+        <StatTile label="Orders" value={formatCompact(k.orders)} delta={delta(k.orders, kp.orders)} deltaNote={deltaNote} spark={ts.map((d) => d.conversions)} hint="Store orders + affiliate purchases" />
+        <StatTile label="Clicks" value={formatCompact(k.clicks)} delta={delta(k.clicks, kp.clicks)} deltaNote={deltaNote} spark={ts.map((d) => d.clicks)} hint="Product + affiliate clicks" />
+        <StatTile label="Conversion rate" value={formatPercent(k.conversionRate, 2)} delta={delta(k.conversionRate, kp.conversionRate)} deltaNote={deltaNote} spark={ts.map((d) => (d.views ? d.conversions / d.views : 0))} hint="Orders ÷ page views" />
       </section>
 
       <section aria-label="Highlights" className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">

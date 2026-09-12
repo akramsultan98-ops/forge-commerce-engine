@@ -87,6 +87,26 @@ export async function enqueueJobAction(_prev: ActionState, fd: FormData): Promis
   });
 }
 
+/** Product Research Agent, portfolio mode: rank the catalog against the operator's constraints. */
+export async function researchPortfolioAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  return act(async () => {
+    const ctx = await actionContext("research:run");
+    const n = (k: string) => (str(fd, k) ? Number(str(fd, k)) : undefined);
+    const payload = {
+      market: str(fd, "market") || "US",
+      budget: n("budget"),
+      businessModel: str(fd, "businessModel") || undefined,
+      desiredMarginPct: n("desiredMarginPct"),
+      targetAudience: str(fd, "targetAudience") || undefined,
+      maxPriceUsd: n("maxPriceUsd"),
+      limit: Math.min(20, n("limit") ?? 10),
+    };
+    const job = await enqueueJob(ctx.db, { type: "product_research", orgId: ctx.orgId, payload, trigger: "MANUAL" });
+    await audit(ctx, "job.enqueue", { type: "job", id: String(job.id) }, { job: "product_research", payload });
+    return { message: `Research agent ranking the catalog (job #${job.id}).`, data: { jobId: job.id } };
+  });
+}
+
 export async function startTestAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   return act(async () => {
     const ctx = await actionContext("products:write");

@@ -5,7 +5,6 @@ import type { ServiceContext } from "../context";
 import { analyticsAgent, contentAgent, landingPageAgent, optimizationAgent, reportingAgent, researchAgent, scoringAgent, trendAgent } from "../agents/agents";
 import { orchestrator } from "../agents/orchestrator";
 import { runAgent } from "../agents/runtime";
-import { runDiscovery } from "../discovery/service";
 import { checkAllLinks } from "../services/affiliate";
 import { dispatchNotification } from "../services/notifications";
 import { refreshRecommendations } from "../services/recommendations";

@@ -1187,6 +1187,7 @@ export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 export type ProductScore = typeof productScores.$inferSelect;
 export type ProductResearch = typeof productResearch.$inferSelect;
+export type ProductReview = typeof productReviews.$inferSelect;
 export type ProductTest = typeof productTests.$inferSelect;
 export type AffiliateNetwork = typeof affiliateNetworks.$inferSelect;
 export type AffiliateLink = typeof affiliateLinks.$inferSelect;

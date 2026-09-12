@@ -1,5 +1,7 @@
 /* Standalone background worker (JOB_RUNNER=external). Run as many replicas as you like —
  * jobs are claimed with FOR UPDATE SKIP LOCKED. Requires a real PostgreSQL DATABASE_URL. */
+export {};
+
 try {
   process.loadEnvFile(".env");
 } catch {

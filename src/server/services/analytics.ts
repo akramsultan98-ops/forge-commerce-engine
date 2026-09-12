@@ -108,27 +108,28 @@ export async function kpis(ctx: Pick<ServiceContext, "db" | "orgId">, range: Dat
   };
 }
 
-export async function timeseries(ctx: Pick<ServiceContext, "db" | "orgId">, range: DateRange) {
+export async function timeseries(ctx: Pick<ServiceContext, "db" | "orgId">, range: DateRange, productId?: string) {
   const from = range.from.toISOString();
   const to = range.to.toISOString();
+  const pf = (alias: string) => (productId ? sql`and ${sql.raw(alias)}.product_id = ${productId}` : sql``);
   const ev = rows(
     await ctx.db.execute(sql`
       select to_char(date_trunc('day', created_at at time zone 'UTC'), 'YYYY-MM-DD') as d,
              count(*) filter (where event_type = 'PAGE_VIEW')::int as views,
              count(*) filter (where event_type in ('AFFILIATE_CLICK','PRODUCT_CLICK'))::int as clicks
       from click_events e
-      where e.organization_id = ${ctx.orgId} and e.created_at >= ${from}::timestamptz and e.created_at < ${to}::timestamptz and e.is_bot = false and ${demoCond("e")}
+      where e.organization_id = ${ctx.orgId} and e.created_at >= ${from}::timestamptz and e.created_at < ${to}::timestamptz and e.is_bot = false and ${demoCond("e")} ${pf("e")}
       group by 1`),
   );
   const cv = rows(
     await ctx.db.execute(sql`
       select to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as d, count(*)::int as conversions, coalesce(sum(commission), 0)::float8 as commission
-      from conversion_events c where c.organization_id = ${ctx.orgId} and c.occurred_at >= ${from}::timestamptz and c.occurred_at < ${to}::timestamptz and ${demoCond("c")} group by 1`),
+      from conversion_events c where c.organization_id = ${ctx.orgId} and c.occurred_at >= ${from}::timestamptz and c.occurred_at < ${to}::timestamptz and ${demoCond("c")} ${pf("c")} group by 1`),
   );
   const od = rows(
     await ctx.db.execute(sql`
       select to_char(date_trunc('day', occurred_at at time zone 'UTC'), 'YYYY-MM-DD') as d, count(*)::int as orders, coalesce(sum(revenue), 0)::float8 as revenue
-      from orders o where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and ${demoCond("o")} group by 1`),
+      from orders o where o.organization_id = ${ctx.orgId} and o.occurred_at >= ${from}::timestamptz and o.occurred_at < ${to}::timestamptz and ${demoCond("o")} ${pf("o")} group by 1`),
   );
   const byDay = new Map<string, { date: string; views: number; clicks: number; conversions: number; revenue: number }>();
   for (let t = new Date(Date.UTC(range.from.getUTCFullYear(), range.from.getUTCMonth(), range.from.getUTCDate())); t < range.to; t = new Date(t.getTime() + 86400_000)) {

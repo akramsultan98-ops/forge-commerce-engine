@@ -5,6 +5,25 @@
 
 import { cn } from "@/lib/utils";
 
+/** Full-width sparkline: stretches to its container; the end marker is an HTML dot so it stays round. */
+export function FluidSparkline({ values, label, height = 28 }: { values: number[]; label?: string; height?: number }) {
+  if (values.length < 2) return <div style={{ height }} aria-hidden />;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const span = max - min || 1;
+  const pts = values.map((v, i) => [1 + (i / (values.length - 1)) * 97, 3 + (1 - (v - min) / span) * (height - 6)] as const);
+  const d = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`).join("");
+  const [lx, ly] = pts[pts.length - 1];
+  return (
+    <div dir="ltr" role="img" aria-label={label ?? `Trend over ${values.length} points`} className="relative w-full" style={{ height }}>
+      <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible" aria-hidden>
+        <path d={d} fill="none" stroke="var(--color-dim)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <span aria-hidden className="absolute h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-s1 ring-2 ring-panel" style={{ left: `${lx}%`, top: `${(ly / height) * 100}%` }} />
+    </div>
+  );
+}
+
 export function Sparkline({ values, width = 112, height = 32, label }: { values: number[]; width?: number; height?: number; label?: string }) {
   if (values.length < 2) return <div style={{ width, height }} aria-hidden />;
   const max = Math.max(...values, 1);
@@ -122,6 +141,7 @@ export function StatTile({
   period = "vs previous period",
   spark,
   hint,
+  deltaNote = "no prior-period data",
 }: {
   label: string;
   value: string;
@@ -130,30 +150,32 @@ export function StatTile({
   period?: string;
   spark?: number[];
   hint?: string;
+  /** Shown instead of a delta when there is no comparable prior period. */
+  deltaNote?: string;
 }) {
   const hasDelta = delta !== null && delta !== undefined && Number.isFinite(delta);
   const up = hasDelta && delta! > 0;
   const flat = hasDelta && Math.abs(delta!) < 0.005;
   const good = flat ? null : up === upIsGood;
   return (
-    <div className="flex min-w-0 flex-col justify-between gap-3 rounded-lg border border-edge bg-panel p-4" title={hint}>
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-xs text-haze">{label}</span>
-        {spark && <Sparkline values={spark} label={`${label} trend`} />}
-      </div>
-      <div>
-        <div className="truncate text-[26px] font-semibold leading-none tracking-tight text-fog">{value}</div>
-        {hasDelta && (
-          <div className="mt-2 flex items-center gap-1.5 text-[11px]">
-            <span aria-hidden className={cn("inline-block h-0 w-0 border-x-[4px] border-x-transparent", flat ? "h-[2px] w-2 bg-dim" : up ? "border-b-[6px]" : "border-t-[6px]", good === true ? "border-b-good border-t-good" : good === false ? "border-b-critical border-t-critical" : "")} />
-            <span className="tabular text-fog">
-              {up ? "+" : ""}
-              {(delta! * 100).toFixed(Math.abs(delta!) < 0.1 ? 1 : 0)}%
+    <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-edge bg-panel p-4" title={hint}>
+      <span className="truncate text-xs text-haze">{label}</span>
+      <div className="truncate text-[26px] font-semibold leading-none tracking-tight text-fog">{value}</div>
+      <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-[11px]">
+        {hasDelta ? (
+          <>
+            <span aria-hidden className={cn("inline-block h-0 w-0 shrink-0 border-x-[4px] border-x-transparent", flat ? "h-[2px] w-2 bg-dim" : up ? "border-b-[6px]" : "border-t-[6px]", good === true ? "border-b-good border-t-good" : good === false ? "border-b-critical border-t-critical" : "")} />
+            <span className="tabular shrink-0 text-fog">
+              {up && delta! < 9 ? "+" : ""}
+              {delta! >= 9 ? `${Math.round(1 + delta!)}×` : `${(delta! * 100).toFixed(Math.abs(delta!) < 0.1 ? 1 : 0)}%`}
             </span>
-            <span className="text-dim">{period}</span>
-          </div>
+            <span className="truncate text-dim">{period}</span>
+          </>
+        ) : (
+          <span className="truncate text-dim">{deltaNote}</span>
         )}
       </div>
+      {spark && <FluidSparkline values={spark} label={`${label} trend`} />}
     </div>
   );
 }

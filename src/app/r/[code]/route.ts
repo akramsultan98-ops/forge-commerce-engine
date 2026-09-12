@@ -26,6 +26,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ code
       referrer: req.headers.get("referer"),
       country: req.headers.get("cf-ipcountry") ?? req.headers.get("x-vercel-ip-country") ?? null,
       appUrl: env().APP_URL,
+      experimentId: req.nextUrl.searchParams.get("x"),
+      variant: req.nextUrl.searchParams.get("v"),
     });
     if (!result) return NextResponse.redirect(new URL("/products?link=unknown", env().APP_URL), 302);
     return NextResponse.redirect(result.destination, { status: 302, headers: { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });

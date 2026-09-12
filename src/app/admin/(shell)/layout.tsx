@@ -91,9 +91,9 @@ function isActive(pathname: string, item: NavItem) {
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-function NavList({ pathname, t }: { pathname: string; t: (k: string) => string }) {
+function NavList({ pathname, t, label }: { pathname: string; t: (k: string) => string; label: string }) {
   return (
-    <nav aria-label="Command center" className="space-y-6">
+    <nav aria-label={label} className="space-y-6">
       {GROUPS.map((g) => (
         <div key={g.key}>
           <p className="eyebrow mb-2 px-3 text-dim">{t(`admin.nav.${g.key}`)}</p>
@@ -145,7 +145,7 @@ export default async function ShellLayout({ children }: { children: React.ReactN
             <span className="eyebrow text-dim">OS</span>
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-5 scrollbar-thin">
-            <NavList pathname={pathname} t={t} />
+            <NavList pathname={pathname} t={t} label="Main navigation" />
           </div>
           <div className="border-t border-edge p-3">
             <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
@@ -172,15 +172,15 @@ export default async function ShellLayout({ children }: { children: React.ReactN
                 <Menu aria-hidden className="h-5 w-5" />
               </summary>
               <div className="absolute start-0 top-11 z-40 max-h-[80vh] w-64 overflow-y-auto rounded-lg border border-edge bg-panel p-3 shadow-2xl">
-                <NavList pathname={pathname} t={t} />
+                <NavList pathname={pathname} t={t} label="Mobile navigation" />
               </div>
             </details>
             <Link href="/admin/dashboard" className="text-sm font-semibold tracking-[0.22em] text-fog lg:hidden">
               FORGE
             </Link>
-            <Link href="/admin/command" className="ms-auto hidden h-8 w-72 items-center gap-2 rounded-md border border-edge-2 bg-panel px-3 text-xs text-dim hover:border-dim md:flex lg:ms-0">
-              <Terminal aria-hidden className="h-3.5 w-3.5" />
-              Ask FORGE… “Which product should I scale?”
+            <Link href="/admin/command" className="ms-auto hidden h-8 w-72 min-w-0 items-center gap-2 rounded-md border border-edge-2 bg-panel px-3 text-xs text-dim hover:border-dim md:flex lg:ms-0">
+              <Terminal aria-hidden className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">Ask FORGE — “Which product should I scale?”</span>
             </Link>
             <div className="ms-auto flex items-center gap-1">
               <Link href="/admin/notifications" className="relative rounded-md p-2 text-haze hover:bg-panel-2 hover:text-fog" aria-label={`${t("admin.nav.notifications")}${unread ? ` (${unread} unread)` : ""}`}>

@@ -177,7 +177,12 @@ export async function updateProduct(ctx: ServiceContext, id: string, raw: unknow
   const patch = Object.fromEntries(Object.entries(parsed.data).filter(([, v]) => v !== undefined)) as Partial<NewProduct>;
   if (patch.title && patch.title !== existing.title) patch.slug = await uniqueSlug(ctx, patch.title, id);
   if (patch.businessModel) patch.businessModels = Array.from(new Set([...(existing.businessModels ?? []), patch.businessModel]));
-  patch.fieldProvenance = provenanceFor(parsed.data, provenance, sourceLabel, existing.fieldProvenance);
+  // Only fields whose value actually changed get the new provenance — re-saving a form must not
+  // relabel live or demo data as operator input.
+  const changed = Object.fromEntries(
+    Object.entries(parsed.data).filter(([k, v]) => v !== undefined && JSON.stringify(v ?? null) !== JSON.stringify((existing as Record<string, unknown>)[k] ?? null)),
+  );
+  patch.fieldProvenance = provenanceFor(changed, provenance, sourceLabel, existing.fieldProvenance);
   patch.estimatedMargin = computeEstimatedMargin({ ...existing, ...patch } as Product);
   const [row] = await ctx.db
     .update(products)
@@ -312,6 +317,16 @@ export async function setProductStatus(ctx: ServiceContext, id: string, status: 
     await ctx.db.update(productTests).set({ status: "COMPLETED", endedAt: new Date() }).where(and(eq(productTests.productId, id), eq(productTests.status, "RUNNING")));
   }
   return row;
+}
+
+/** Automation: the product can no longer be bought (out of stock, delisted, dead merchant page) → pause + alert. */
+export async function markProductUnavailable(ctx: ServiceContext, productId: string, reason: string) {
+  const [p] = await ctx.db.update(products).set({ available: false, lastCheckedAt: new Date() }).where(and(eq(products.id, productId), eq(products.organizationId, ctx.orgId))).returning();
+  if (!p) return null;
+  if (["TESTING", "WINNER", "SCALING", "APPROVED"].includes(p.status)) await setProductStatus({ ...ctx, role: "admin" }, productId, "PAUSED", reason);
+  const { notify } = await import("./notifications");
+  await notify(ctx, { type: "INVENTORY_UNAVAILABLE", severity: "warning", title: `${p.title} is unavailable`, body: `${reason}. The product was paused so no more traffic is sent to it.`, entity: { type: "product", id: productId } });
+  return p;
 }
 
 export async function deleteProduct(ctx: ServiceContext, id: string) {

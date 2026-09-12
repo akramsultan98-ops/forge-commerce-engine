@@ -61,6 +61,29 @@ export async function computeRecommendations(ctx: ServiceContext): Promise<Recom
     }
   }
 
+  // Performance drop: week-over-week traffic decline on live products.
+  const drops = await ctx.db.execute(sql`
+    select p.id, p.title,
+      (select count(*) from click_events e where e.product_id = p.id and e.event_type = 'PAGE_VIEW' and e.is_bot = false and e.created_at >= now() - interval '7 days')::int as recent,
+      (select count(*) from click_events e where e.product_id = p.id and e.event_type = 'PAGE_VIEW' and e.is_bot = false and e.created_at >= now() - interval '14 days' and e.created_at < now() - interval '7 days')::int as prior
+    from products p where p.organization_id = ${ctx.orgId} and p.status in ('TESTING','WINNER','SCALING')`);
+  for (const r of drops.rows as Array<{ id: string; title: string; recent: number; prior: number }>) {
+    const recent = Number(r.recent);
+    const prior = Number(r.prior);
+    if (prior >= 100 && recent < prior * 0.6) {
+      out.push({
+        type: "PERFORMANCE_DROP",
+        fingerprint: `performance-drop:${r.id}`,
+        productId: r.id,
+        priority: "HIGH",
+        title: `Traffic to ${r.title} is falling`,
+        body: `Page views fell ${Math.round((1 - recent / prior) * 100)}% week-over-week (${recent} vs ${prior}). Refresh the content with a new hook and re-check the landing page's first screen before the test window closes.`,
+        action: { kind: "GENERATE_CONTENT", label: "Generate 5 fresh hooks", params: { productId: r.id, count: 5 } },
+        evidence: { views7d: recent, viewsPrior7d: prior },
+      });
+    }
+  }
+
   // Winning hook → more of the same.
   const perf = await contentPerformance(ctx, { since: range.from, includeDemo: isDemoMode() });
   const scored = perf.filter((p) => p.views >= 300 || p.siteVisits >= 30);

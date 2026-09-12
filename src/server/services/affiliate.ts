@@ -212,10 +212,12 @@ export async function checkLink(ctx: ServiceContext, link: AffiliateLink): Promi
   let status: AffiliateLink["status"] = link.status;
   let code: number | null = null;
   let error: string | null = null;
+  let gone = false;
   try {
     let res = await safeFetch(link.url, { method: "HEAD", timeoutMs: 8000 });
     if (res.status === 405 || res.status === 501) res = await safeFetch(link.url, { method: "GET", timeoutMs: 8000, maxBytes: 64_000 });
     code = res.status;
+    gone = res.status === 404 || res.status === 410;
     if (res.status >= 200 && res.status < 300) status = "ACTIVE";
     else if (res.status === 404 || res.status === 410 || res.status >= 500) {
       status = "BROKEN";
@@ -230,6 +232,11 @@ export async function checkLink(ctx: ServiceContext, link: AffiliateLink): Promi
     const { notify } = await import("./notifications");
     const [p] = link.productId ? await ctx.db.select({ title: products.title }).from(products).where(eq(products.id, link.productId)).limit(1) : [];
     await notify(ctx, { type: "LINK_BROKEN", severity: "warning", title: `Affiliate link appears broken${p ? `: ${p.title}` : ""}`, body: `${link.url} returned ${error}. Traffic to this product should be paused until the link is fixed.`, entity: { type: "affiliate_link", id: link.id } });
+    // A primary merchant page that is gone (404/410) means the product can't be bought → pause it.
+    if (gone && link.isPrimary && link.productId) {
+      const { markProductUnavailable } = await import("./products");
+      await markProductUnavailable(ctx, link.productId, `The merchant page returned HTTP ${code}`);
+    }
   }
   return { status, code, error };
 }

@@ -1,12 +1,14 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
-import path from "node:path";
+
+const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": r("./src"),
       // `server-only` throws outside the react-server condition; tests run plain Node.
-      "server-only": path.resolve(__dirname, "tests/support/empty.ts"),
+      "server-only": r("./tests/support/empty.ts"),
     },
   },
   test: {

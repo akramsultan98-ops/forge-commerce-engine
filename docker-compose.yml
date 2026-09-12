@@ -1,0 +1,66 @@
+# FORGE — local/production-like stack: PostgreSQL + one-shot migrations + web + background worker.
+#   cp .env.example .env   # set AUTH_SECRET, ENCRYPTION_KEY, APP_URL, DEMO_MODE, provider keys
+#   docker compose up -d --build
+#   docker compose run --rm migrate node dist/cli.cjs admin:create --email=you@example.com --name="You"
+name: forge
+
+x-app: &app
+  image: forge-app:latest
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-env
+    DATABASE_URL: postgres://forge:${POSTGRES_PASSWORD:-forge}@db:5432/forge
+    JOB_RUNNER: external
+    NODE_ENV: production
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: forge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forge}
+      POSTGRES_DB: forge
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forge -d forge"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    build: .
+    command: ["node", "dist/cli.cjs", "migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    <<: *app
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *app
+    command: ["node", "dist/worker.cjs"]
+    environment:
+      <<: *app-env
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+
+volumes:
+  pgdata:

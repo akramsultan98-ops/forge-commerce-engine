@@ -25,11 +25,13 @@ export function convert(amount: number, from: string, to: string, rates: Record<
 
 export function formatMoney(amount: number | null | undefined, currency: string, locale = "en", opts: { compact?: boolean } = {}): string {
   if (amount === null || amount === undefined || Number.isNaN(amount)) return "—";
+  // Compact notation only helps from 1,000 up ($12.9K); below that show clean whole/cent amounts.
+  const compact = opts.compact && Math.abs(amount) >= 1000;
   return new Intl.NumberFormat(locale === "ar" ? "ar-EG" : "en-US", {
     style: "currency",
     currency,
-    notation: opts.compact ? "compact" : "standard",
-    maximumFractionDigits: opts.compact ? 1 : amount % 1 === 0 && Math.abs(amount) >= 100 ? 0 : 2,
+    notation: compact ? "compact" : "standard",
+    maximumFractionDigits: compact ? 1 : Math.abs(amount) >= 100 && (opts.compact || amount % 1 === 0) ? 0 : 2,
   }).format(amount);
 }
 

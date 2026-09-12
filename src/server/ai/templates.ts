@@ -197,7 +197,7 @@ export function templateLandingSections(
   const affiliate = b.businessModel === "AFFILIATE";
   const heroHeadline: Record<LandingTemplate, string> = {
     PROBLEM_SOLUTION: copy.headline,
-    VIRAL: `You've probably seen it in a video. Here's how it actually works.`,
+    VIRAL: `Seen it in a video? Here's how it actually works.`,
     PREMIUM: `${b.shortName}, done properly.`,
     IMPULSE: `${b.shortName}${p ? ` — ${p}` : ""}.`,
     UGC: `What changed after two weeks with ${noun(b)}.`,

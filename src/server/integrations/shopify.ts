@@ -292,6 +292,22 @@ export async function handleShopifyWebhook(db: Database, topic: string, shop: st
     await db.update(integrations).set({ status: "NOT_CONFIGURED", credentialsEncrypted: null, lastError: "App uninstalled from Shopify" }).where(eq(integrations.id, integration.id));
     return { disconnected: true };
   }
+  if (topic === "products/update" || topic === "products/delete") {
+    const gid = `gid://shopify/Product/${payload.id}`;
+    const [p] = await db.select({ id: products.id }).from(products).where(and(eq(products.organizationId, orgId), eq(products.shopifyProductId, gid))).limit(1);
+    if (!p) return { ignored: "unmapped product" };
+    const variants = (payload.variants as Array<{ inventory_quantity?: number; inventory_management?: string | null }>) ?? [];
+    const tracked = variants.filter((v) => v.inventory_management);
+    const unavailable = topic === "products/delete" || payload.status === "archived" || (tracked.length > 0 && tracked.every((v) => (v.inventory_quantity ?? 0) <= 0));
+    if (unavailable) {
+      const { systemContext } = await import("../context");
+      const { markProductUnavailable } = await import("../services/products");
+      await markProductUnavailable(systemContext(orgId, db), p.id, topic === "products/delete" ? "The product was deleted in Shopify" : "Shopify reports the product as out of stock or archived");
+    } else {
+      await db.update(products).set({ available: true, lastCheckedAt: new Date() }).where(eq(products.id, p.id));
+    }
+    return { available: !unavailable };
+  }
   if (topic === "orders/create" || topic === "orders/paid") {
     const lines = (payload.line_items as Array<{ product_id?: number; quantity?: number }>) ?? [];
     const gids = lines.map((l) => `gid://shopify/Product/${l.product_id}`);

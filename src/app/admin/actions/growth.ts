@@ -104,6 +104,23 @@ export async function publishContentAction(_prev: ActionState, fd: FormData): Pr
   });
 }
 
+/** Attaches a hosted asset (image/video URL) to a content item — used for publishing and packages. */
+export async function addAssetAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
+  return act(async () => {
+    const ctx = await actionContext("content:write");
+    const url = str(fd, "url");
+    if (!/^https:\/\/\S+$/i.test(url) || url.length > 2048) throw new ValidationError("Asset URL must be an https:// link");
+    const kind = str(fd, "kind");
+    if (!["IMAGE", "VIDEO", "UGC", "THUMBNAIL", "CREATIVE_VARIANT"].includes(kind)) throw new ValidationError("Unknown asset kind");
+    const { getContent } = await import("@/server/services/content");
+    const item = await getContent(ctx, str(fd, "contentId"));
+    const { contentAssets } = await import("@/server/db/schema");
+    await ctx.db.insert(contentAssets).values({ organizationId: ctx.orgId, contentId: item.id, productId: item.productId, kind: kind as "IMAGE", url, provider: "URL", mimeType: kind === "VIDEO" || kind === "UGC" ? "video/*" : "image/*" });
+    if (item.status === "SCRIPTED" || item.status === "IDEA") await updateContent(ctx, item.id, { status: "ASSET_READY" });
+    return "Asset attached.";
+  });
+}
+
 // ── Experiments ──────────────────────────────────────────────────────────────
 export async function quickExperimentAction(_prev: ActionState, fd: FormData): Promise<ActionState> {
   return act(async () => {

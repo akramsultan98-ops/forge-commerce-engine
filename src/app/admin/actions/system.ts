@@ -182,7 +182,7 @@ export async function networkAction(_prev: ActionState, fd: FormData): Promise<A
     }
     if (op === "postback") {
       const url = await rotatePostbackSecret(ctx, str(fd, "id"));
-      return { message: "New postback URL generated — paste it into the network's postback/pixel settings. It is shown only now.", data: { postbackUrl: url } };
+      return { message: `New postback URL (shown only now — paste it into the network's postback/pixel settings): ${url}`, data: { postbackUrl: url } };
     }
     throw new ValidationError("Unknown operation");
   });

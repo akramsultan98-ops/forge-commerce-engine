@@ -108,7 +108,7 @@ export async function recordEvent(db: Database, input: TrackInput): Promise<stri
  */
 export async function handleTrackedRedirect(
   db: Database,
-  input: { code: string; utm: Utm; visitorId?: string | null; ip?: string | null; userAgent?: string | null; referrer?: string | null; country?: string | null; appUrl: string },
+  input: { code: string; utm: Utm; visitorId?: string | null; ip?: string | null; userAgent?: string | null; referrer?: string | null; country?: string | null; appUrl: string; experimentId?: string | null; variant?: string | null },
 ): Promise<{ destination: string; clickId: string | null } | null> {
   if (!/^[A-Za-z0-9]{6,16}$/.test(input.code)) return null;
   const [row] = await db
@@ -131,6 +131,8 @@ export async function handleTrackedRedirect(
     eventType,
     productId: link.productId,
     affiliateLinkId: link.id,
+    experimentId: input.experimentId && /^[0-9a-f-]{36}$/i.test(input.experimentId) ? input.experimentId : null,
+    variant: input.variant && /^[a-z0-9_-]{1,20}$/.test(input.variant) ? input.variant : null,
     visitorId: input.visitorId,
     utm: input.utm,
     referrer: input.referrer,
