@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import {
   AFFILIATE_NETWORK_TYPES,
+  AFFILIATE_PRODUCT_STATUSES,
   ARTICLE_STATUSES,
   ARTICLE_TYPES,
   ASSET_KINDS,
@@ -306,6 +307,12 @@ export const products = pgTable(
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     available: boolean("available").notNull().default(true),
     fieldProvenance: jsonb("field_provenance").$type<Record<string, FieldProvenance>>().notNull().default({}),
+    // Set when the product shows data from an affiliate network listing (affiliate_products.product_id):
+    // the storefront stops showing the product once the network data expires (Amazon: 24 h after
+    // fetching) — a refresh moves it forward. NULL = no freshness rule.
+    externalDataExpiresAt: ts("external_data_expires_at"),
+    // When the network requires prices to be shown with the time they were observed: that time.
+    priceAsOf: ts("price_as_of"),
     isDemo: boolean("is_demo").notNull().default(false),
     discoveredAt: ts("discovered_at").notNull().defaultNow(),
     lastCheckedAt: ts("last_checked_at"),
@@ -527,6 +534,8 @@ export const affiliateLinks = pgTable(
     organizationId: orgRef(),
     networkId: uuid("network_id").references(() => affiliateNetworks.id, { onDelete: "set null" }),
     productId: uuid("product_id").references(() => products.id, { onDelete: "cascade" }),
+    // The network listing this link was published from — its URL is managed by the listing (refresh keeps it current).
+    affiliateProductId: uuid("affiliate_product_id").references(() => affiliateProducts.id, { onDelete: "set null" }),
     merchant: text("merchant"),
     url: text("url").notNull(),
     code: text("code").notNull(),
@@ -543,8 +552,88 @@ export const affiliateLinks = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex("affiliate_links_code_uq").on(t.code), index("affiliate_links_product_idx").on(t.productId)],
+  (t) => [uniqueIndex("affiliate_links_code_uq").on(t.code), index("affiliate_links_product_idx").on(t.productId), index("affiliate_links_listing_idx").on(t.affiliateProductId)],
 );
+
+export const affiliateProductStatusEnum = pgEnum("affiliate_product_status", AFFILIATE_PRODUCT_STATUSES);
+
+/**
+ * A product listing from an affiliate network or merchant marketplace (e.g. an ASIN on www.amazon.eg),
+ * normalised so FORGE treats every network the same way. Network-specific fetching lives in
+ * src/server/affiliate/<provider>; review, n8n and publishing only use this row. Separate from
+ * `products` (the research/testing lifecycle) — `productId` links the storefront product once published.
+ * `dataFetchedAt` enforces freshness: Amazon's licence allows showing fetched data for at most 24 hours.
+ */
+export const affiliateProducts = pgTable(
+  "affiliate_products",
+  {
+    id: id(),
+    organizationId: orgRef(),
+    network: affiliateNetworkTypeEnum("network").notNull(),
+    networkId: uuid("network_id").references(() => affiliateNetworks.id, { onDelete: "set null" }),
+    merchant: text("merchant"),
+    marketplace: text("marketplace").notNull(), // e.g. www.amazon.eg
+    country: text("country").notNull(), // ISO 3166-1 alpha-2
+    externalId: text("external_id").notNull(), // ASIN or the network's product id
+    externalIdType: text("external_id_type").notNull().default("ID"), // ASIN, PRODUCT_ID… (the provider's id kind)
+    parentExternalId: text("parent_external_id"),
+    title: text("title").notNull(),
+    description: text("description"),
+    features: jsonb("features").$type<string[]>().notNull().default([]),
+    category: text("category"),
+    categoryPath: jsonb("category_path").$type<string[]>().notNull().default([]),
+    brand: text("brand"),
+    productUrl: text("product_url"),
+    affiliateUrl: text("affiliate_url"),
+    imageUrls: jsonb("image_urls").$type<string[]>().notNull().default([]), // links only — never copied
+    price: money("price"),
+    currency: text("currency"),
+    priceDisplay: text("price_display"),
+    availability: text("availability").notNull().default("UNKNOWN"), // AFFILIATE_AVAILABILITY
+    availabilityMessage: text("availability_message"),
+    rating: doublePrecision("rating"),
+    reviewCount: integer("review_count"),
+    reviewSource: text("review_source"), // set only when the network legitimately supplies review data
+    commissionRate: doublePrecision("commission_rate"), // as supplied by the network
+    networkMeta: jsonb("network_meta").$type<Record<string, unknown>>().notNull().default({}),
+    // ── FORGE-owned (editorial) fields — edited in FORGE, never overwritten by a refresh ──
+    categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }), // storefront category
+    summary: text("summary"), // FORGE's own description, shown instead of / when the network has none
+    problemSolved: text("problem_solved"),
+    targetAudience: text("target_audience"),
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    expectedCommissionRate: doublePrecision("expected_commission_rate"), // operator's figure from the network's rate card
+    // Score recorded by an automation (e.g. n8n) or an operator — always with its provenance and source.
+    score: doublePrecision("score"),
+    scoreProvenance: provenanceEnum("score_provenance"),
+    scoreSource: text("score_source"),
+    scoreReasons: jsonb("score_reasons").$type<string[]>().notNull().default([]),
+    scoredAt: ts("scored_at"),
+    // ── Review lifecycle ──
+    status: affiliateProductStatusEnum("status").notNull().default("DISCOVERED"),
+    statusChangedAt: ts("status_changed_at"),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+    reviewNote: text("review_note"),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    publishedAt: ts("published_at"),
+    // Incremented by every edit and transition — clients send the revision they saw (concurrent-edit protection).
+    revision: integer("revision").notNull().default(1),
+    ingestSource: text("ingest_source").notNull().default("api"), // provider | n8n | api | manual
+    provenance: provenanceEnum("provenance").notNull().default("REAL"),
+    dataFetchedAt: ts("data_fetched_at"),
+    lastSyncError: text("last_sync_error"),
+    isDemo: boolean("is_demo").notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("affiliate_products_listing_uq").on(t.organizationId, t.network, t.marketplace, t.externalId),
+    index("affiliate_products_org_status_idx").on(t.organizationId, t.status),
+    index("affiliate_products_org_fetched_idx").on(t.organizationId, t.dataFetchedAt),
+    index("affiliate_products_product_idx").on(t.productId),
+  ],
+);
+export type AffiliateProduct = typeof affiliateProducts.$inferSelect;
 
 // ── Marketing ────────────────────────────────────────────────────────────────
 export const campaigns = pgTable(
@@ -752,6 +841,10 @@ export const clickEvents = pgTable(
     eventType: eventTypeEnum("event_type").notNull(),
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     affiliateLinkId: uuid("affiliate_link_id").references(() => affiliateLinks.id, { onDelete: "set null" }),
+    // The network listing behind a tracked-link click (kept even if the storefront product is later unlinked).
+    affiliateProductId: uuid("affiliate_product_id").references(() => affiliateProducts.id, { onDelete: "set null" }),
+    // Merchant host a click was redirected to (AFFILIATE_CLICK = an outbound redirect that was served).
+    destinationHost: text("destination_host"),
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     contentId: uuid("content_id").references(() => content.id, { onDelete: "set null" }),
     landingPageId: uuid("landing_page_id").references(() => landingPages.id, { onDelete: "set null" }),
@@ -778,6 +871,7 @@ export const clickEvents = pgTable(
     index("click_events_product_created_idx").on(t.productId, t.createdAt),
     index("click_events_type_idx").on(t.organizationId, t.eventType, t.createdAt),
     index("click_events_utm_content_idx").on(t.organizationId, t.utmContent),
+    index("click_events_listing_created_idx").on(t.affiliateProductId, t.createdAt),
   ],
 );
 

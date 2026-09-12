@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
-import { and, asc, count, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { AFFILIATE_NETWORK_TYPES } from "@/lib/constants";
 import { slugify } from "@/lib/utils";
 import { buildUtmUrl, isSafeRedirectUrl, type UtmParams } from "@/domain/utm";
 import { assertCan, type ServiceContext } from "../context";
 import type { Database } from "../db/client";
-import { affiliateLinks, affiliateNetworks, products, type AffiliateLink, type AffiliateNetwork } from "../db/schema";
+import { affiliateLinks, affiliateNetworks, affiliateProducts, products, type AffiliateLink, type AffiliateNetwork } from "../db/schema";
 import { audit } from "../audit";
 import { env } from "../env";
 import { NotFoundError, ValidationError } from "../errors";
@@ -133,7 +133,7 @@ const LinkInput = z.object({
   isPrimary: z.coerce.boolean().optional(),
 });
 
-function newCode(): string {
+export function newLinkCode(): string {
   const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const bytes = crypto.randomBytes(8);
   return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
@@ -146,6 +146,8 @@ export async function createLink(ctx: ServiceContext, raw: unknown, opts: { isDe
   const d = parsed.data;
   const [product] = await ctx.db.select({ id: products.id }).from(products).where(and(eq(products.id, d.productId), eq(products.organizationId, ctx.orgId))).limit(1);
   if (!product) throw new NotFoundError("Product");
+  const [listing] = await ctx.db.select({ id: affiliateProducts.id }).from(affiliateProducts).where(and(eq(affiliateProducts.productId, d.productId), eq(affiliateProducts.organizationId, ctx.orgId))).limit(1);
+  if (listing) throw new ValidationError("This product is published from a network listing — its tracked link is created by publishing and kept current by the listing's refresh");
   const primary = d.isPrimary ?? true;
   let row: AffiliateLink | undefined;
   for (let attempt = 0; attempt < 5 && !row; attempt++) {
@@ -157,7 +159,7 @@ export async function createLink(ctx: ServiceContext, raw: unknown, opts: { isDe
         networkId: d.networkId ?? null,
         merchant: d.merchant ?? null,
         url: d.url,
-        code: newCode(),
+        code: newLinkCode(),
         commissionRate: d.commissionRate ?? null,
         commissionFlat: d.commissionFlat ?? null,
         cookieDays: d.cookieDays ?? null,
@@ -209,6 +211,11 @@ export async function checkLink(ctx: ServiceContext, link: AffiliateLink): Promi
     await ctx.db.update(affiliateLinks).set({ lastCheckedAt: new Date(), lastError: "Demo link — not checked against the network" }).where(eq(affiliateLinks.id, link.id));
     return { status: link.status, code: null, error: "demo" };
   }
+  if (link.affiliateProductId) {
+    // Network listing links are verified through the network's API (refresh) — FORGE never requests the merchant's pages.
+    await ctx.db.update(affiliateLinks).set({ lastCheckedAt: new Date(), lastError: "Network listing — checked through the network API refresh, not by requesting the merchant page" }).where(eq(affiliateLinks.id, link.id));
+    return { status: link.status, code: null, error: "listing" };
+  }
   let status: AffiliateLink["status"] = link.status;
   let code: number | null = null;
   let error: string | null = null;
@@ -242,7 +249,8 @@ export async function checkLink(ctx: ServiceContext, link: AffiliateLink): Promi
 }
 
 export async function checkAllLinks(ctx: ServiceContext) {
-  const links = await ctx.db.select().from(affiliateLinks).where(and(eq(affiliateLinks.organizationId, ctx.orgId), inArray(affiliateLinks.status, ["ACTIVE", "UNCHECKED", "BROKEN"])));
+  // Listing links are excluded: the network API refresh checks them (no requests to merchant pages such as Amazon's).
+  const links = await ctx.db.select().from(affiliateLinks).where(and(eq(affiliateLinks.organizationId, ctx.orgId), inArray(affiliateLinks.status, ["ACTIVE", "UNCHECKED", "BROKEN"]), isNull(affiliateLinks.affiliateProductId)));
   const summary = { checked: 0, active: 0, broken: 0, skipped: 0 };
   for (const l of links) {
     const r = await checkLink(ctx, l);

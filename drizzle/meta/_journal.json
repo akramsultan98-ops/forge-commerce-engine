@@ -15,6 +15,20 @@
       "when": 1789210583739,
       "tag": "0001_shopify_order_lines",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789238116052,
+      "tag": "0002_affiliate_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789240515248,
+      "tag": "0003_affiliate_publishing",
+      "breakpoints": true
     }
   ]
 }

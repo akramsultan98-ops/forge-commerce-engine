@@ -24,7 +24,7 @@ interface SourceAdapter {
 | Shopify-compatible supplier catalog | implemented | connected Shopify store synced by a supplier app |
 | Wikimedia pageviews (trend signal) | implemented, no key | a Wikipedia article title per product (`trend keyword`) |
 | AliExpress Open Platform | interface | approved app key/secret |
-| Amazon Product Advertising API | interface | Associates account with API access |
+| Amazon Associates — Creators API | implemented as an affiliate provider ([AFFILIATE_PRODUCTS.md](AFFILIATE_PRODUCTS.md)) | Amazon.eg Associates account with Creators API access (≥ 10 qualifying sales / 30 days) |
 | TikTok Shop Partner API | interface | approved partner app |
 | DSers-compatible | interface | no public discovery API — use AliExpress + DSers fulfilment |
 | Social trend signals (Pinterest Trends / TikTok Research) | interface | approved access |

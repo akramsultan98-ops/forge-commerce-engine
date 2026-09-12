@@ -55,9 +55,12 @@ const EnvSchema = z.object({
   CJ_API_KEY: z.string().default(""),
   ALIEXPRESS_APP_KEY: z.string().default(""),
   ALIEXPRESS_APP_SECRET: z.string().default(""),
-  AMAZON_PAAPI_ACCESS_KEY: z.string().default(""),
-  AMAZON_PAAPI_SECRET_KEY: z.string().default(""),
+  // Amazon Associates — Creators API (server-only; validated in src/server/affiliate/amazon/config.ts)
+  AMAZON_CREATORS_CREDENTIAL_ID: z.string().default(""),
+  AMAZON_CREATORS_CREDENTIAL_SECRET: z.string().default(""),
+  AMAZON_CREATORS_CREDENTIAL_VERSION: z.string().default(""),
   AMAZON_PARTNER_TAG: z.string().default(""),
+  AMAZON_MARKETPLACE: z.string().default("www.amazon.eg"),
   TRENDS_WIKIPEDIA_ENABLED: bool.default(true),
 
   TIKTOK_CLIENT_KEY: z.string().default(""),

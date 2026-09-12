@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { USER_ROLES, type UserRole } from "@/lib/constants";
+import { HUMAN_ROLES, USER_ROLES, type UserRole } from "@/lib/constants";
 import { actionContext } from "@/server/auth/session";
 import { act, str, type ActionState } from "@/server/actions/util";
 import { setSetting, type SettingKey } from "@/server/settings";
@@ -73,7 +73,8 @@ export async function createUserAction(_prev: ActionState, fd: FormData): Promis
   return act(async () => {
     const ctx = await actionContext("users:manage");
     const role = str(fd, "role") as UserRole;
-    if (!(USER_ROLES as readonly string[]).includes(role)) throw new ValidationError("Unknown role");
+    // People get a human role; `automation` is reserved for API keys.
+    if (!(HUMAN_ROLES as readonly string[]).includes(role)) throw new ValidationError("Unknown role");
     const u = await createUser(ctx.db, { organizationId: ctx.orgId, email: str(fd, "email"), name: str(fd, "name"), password: str(fd, "password"), role });
     await audit(ctx, "user.create", { type: "user", id: u.id }, { role });
     return `${u.email} added as ${role}.`;
@@ -91,7 +92,7 @@ export async function updateUserAction(_prev: ActionState, fd: FormData): Promis
       if (op === "disable") await revokeUserSessions(ctx.db, id);
     } else {
       const role = str(fd, "role") as UserRole;
-      if (!(USER_ROLES as readonly string[]).includes(role)) throw new ValidationError("Unknown role");
+      if (!(HUMAN_ROLES as readonly string[]).includes(role)) throw new ValidationError("Unknown role");
       await ctx.db.update(users).set({ role }).where(and(eq(users.id, id), eq(users.organizationId, ctx.orgId)));
     }
     await audit(ctx, `user.${op || "role"}`, { type: "user", id });
@@ -108,6 +109,7 @@ export async function apiKeyAction(_prev: ActionState, fd: FormData): Promise<Ac
       return "Key revoked.";
     }
     const role = (str(fd, "role") || "viewer") as UserRole;
+    if (!(USER_ROLES as readonly string[]).includes(role)) throw new ValidationError("Unknown role");
     const { key, record } = await createApiKey(ctx.db, { organizationId: ctx.orgId, name: str(fd, "name") || "API key", role, createdBy: ctx.userId });
     await audit(ctx, "api_key.create", { type: "api_key", id: record.id }, { role });
     return { message: `Key created — copy it now, it will not be shown again: ${key}`, data: { key } };
@@ -208,7 +210,8 @@ export async function linkAction(_prev: ActionState, fd: FormData): Promise<Acti
       const [link] = await ctx.db.select().from(affiliateLinks).where(and(eq(affiliateLinks.id, id), eq(affiliateLinks.organizationId, ctx.orgId))).limit(1);
       if (!link) throw new ValidationError("Link not found");
       const r = await checkLink(ctx, link);
-      return r.error === "demo" ? "Demo link — not checked against the network." : `Status ${r.status}${r.code ? ` (HTTP ${r.code})` : ""}${r.error ? ` — ${r.error}` : ""}.`;
+      if (r.error === "listing") return "Network listing link — FORGE checks it through the network API refresh, never by requesting the merchant's page.";
+      return r.error === "demo" ? "Demo link — not checked against the network." :`Status ${r.status}${r.code ? ` (HTTP ${r.code})` : ""}${r.error ? ` — ${r.error}` : ""}.`;
     }
     if (op === "pause" || op === "activate") {
       await setLinkStatus(ctx, id, op === "pause" ? "PAUSED" : "ACTIVE");

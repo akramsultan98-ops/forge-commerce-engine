@@ -162,6 +162,7 @@ export const en = {
       dashboard: "Dashboard",
       command: "Command center",
       products: "Products",
+      listings: "Network listings",
       discover: "Discover",
       testing: "Testing",
       winners: "Winners",

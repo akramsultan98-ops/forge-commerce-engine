@@ -1,13 +1,22 @@
 import Link from "next/link";
 import { convert, formatMoney } from "@/domain/money";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import type { PublicProduct } from "@/server/services/storefront";
 import { ProductVisual } from "../ProductVisual";
 
-export function priceLabel(p: Pick<PublicProduct, "sellingPrice" | "currency">, display: string, rates: Record<string, number>, locale: string) {
+export function priceLabel(p: Pick<PublicProduct, "sellingPrice" | "currency" | "priceAsOf">, display: string, rates: Record<string, number>, locale: string) {
   if (p.sellingPrice === null) return null;
+  // Network prices that must carry their observation time (e.g. Amazon) appear only where that time and
+  // the network's statement are shown too — the product page (observedPriceLabel).
+  if (p.priceAsOf) return null;
   if (p.currency === display) return formatMoney(p.sellingPrice, display, locale);
   return `≈ ${formatMoney(convert(p.sellingPrice, p.currency, display, rates), display, locale)}`;
+}
+
+/** A network price with the time it was observed, in the network's own currency (never converted). */
+export function observedPriceLabel(p: Pick<PublicProduct, "sellingPrice" | "currency" | "priceAsOf">, locale: string) {
+  if (p.sellingPrice === null || !p.priceAsOf) return null;
+  return `${formatMoney(p.sellingPrice, p.currency, locale)} · as of ${formatDate(p.priceAsOf, locale, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })} UTC`;
 }
 
 export function ProductCard({

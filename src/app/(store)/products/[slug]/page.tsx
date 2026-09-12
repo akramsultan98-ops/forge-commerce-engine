@@ -12,7 +12,7 @@ import { getPrimaryPageForProduct } from "@/server/services/landing-pages";
 import { publicProductBySlug, publicProducts, storefront } from "@/server/services/storefront";
 import { productPageModel } from "@/server/services/product-page";
 import { LandingRenderer } from "@/components/store/LandingRenderer";
-import { ProductCard, SectionHead, priceLabel } from "@/components/store/ProductCard";
+import { ProductCard, SectionHead, observedPriceLabel, priceLabel } from "@/components/store/ProductCard";
 import { Tracker } from "@/components/store/client";
 
 type Params = { params: Promise<{ slug: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> };
@@ -41,7 +41,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const sp = await searchParams;
   const data = await publicProductBySlug(slug);
   if (!data) notFound();
-  const { product: p, score, link, reviews } = data;
+  const { product: p, score, link, reviews, network } = data;
   const { t, locale } = await getI18n();
   const { db, org, rates } = await storefront();
   const display = await getDisplayCurrency(org.defaultCurrency);
@@ -52,8 +52,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const brief = buildBrief(p);
   const appUrl = env().APP_URL;
   const url = new URL(`/products/${p.slug}`, appUrl).toString();
+  // Products published from a network listing follow the network's display rules.
+  const policy = network?.policy ?? null;
+  const observedPrice = observedPriceLabel(p, locale);
+  const sections = policy ? model.sections.map((s) => (s.type === "HERO" || s.type === "CTA" ? { ...s, content: { ...s.content, ctaLabel: "" } } : s)) : model.sections;
   const ld = [
-    productJsonLd({ name: p.title, description: p.description ?? p.title, url, image: p.imageUrl, brand: p.brand, sku: p.sourceProductId, price: p.sellingPrice, currency: p.currency, available: p.available, rating: brief.rating ? { value: brief.rating.value, count: brief.rating.count } : null, offerUrl: url }),
+    productJsonLd({ name: p.title, description: p.description ?? p.title, url, image: p.imageUrl, brand: p.brand, sku: p.sourceProductId, price: policy && !policy.structuredDataPrice ? null : p.sellingPrice, currency: p.currency, available: p.available, rating: brief.rating ? { value: brief.rating.value, count: brief.rating.count } : null, offerUrl: url }),
     breadcrumbJsonLd([
       { name: "FORGE", url: appUrl },
       ...(p.categorySlug ? [{ name: p.categoryName ?? "", url: new URL(`/category/${p.categorySlug}`, appUrl).toString() }] : []),
@@ -92,9 +96,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </p>
         </div>
       )}
+      {policy?.disclosure && (
+        <p className="mx-auto mt-4 max-w-[1200px] px-5 text-xs text-muted md:px-10">{policy.disclosure}</p>
+      )}
 
       <LandingRenderer
-        sections={model.sections}
+        sections={sections}
         ctx={{
           title: p.title,
           slug: p.slug,
@@ -102,10 +109,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
           categoryName: p.categoryName,
           categoryIcon: p.categoryIcon,
           ctaHref: model.ctaHref,
-          ctaLabel: model.ctaLabel,
+          ctaLabel: policy?.ctaLabel ?? model.ctaLabel,
           unavailableLabel: "Not available yet",
-          priceText: priceLabel(p, display, rates, locale),
-          merchantNote: p.businessModel === "AFFILIATE" ? t("product.merchantNote") : t("product.priceNote"),
+          priceText: observedPrice ?? priceLabel(p, display, rates, locale),
+          merchantNote: observedPrice && policy?.priceDisclaimer ? policy.priceDisclaimer : p.businessModel === "AFFILIATE" ? t("product.merchantNote") : t("product.priceNote"),
           sponsored: p.businessModel === "AFFILIATE",
           reviews,
           labels: { problem: t("home.problemLabel"), howItWorks: t("product.howItWorks"), faq: t("product.faq"), shipping: t("product.shipping"), returns: t("product.returns"), disclosure: t("product.disclosure"), whyInterested: t("product.whyInterested") },

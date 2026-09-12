@@ -1,5 +1,5 @@
 import { desc, eq } from "drizzle-orm";
-import { CURRENCIES, MARKETS, USER_ROLES } from "@/lib/constants";
+import { CURRENCIES, HUMAN_ROLES, MARKETS, USER_ROLES } from "@/lib/constants";
 import { can } from "@/lib/rbac";
 import { formatRelative } from "@/lib/utils";
 import { FACTOR_META, SCORING_FACTORS } from "@/domain/scoring";
@@ -311,7 +311,7 @@ async function Users({ ctx }: { ctx: Ctx }) {
                     <ActionForm action={updateUserAction} className="flex items-center gap-2">
                       <input type="hidden" name="id" value={u.id} />
                       <input type="hidden" name="op" value="role" />
-                      <Select name="role" defaultValue={u.role} className="h-8 w-32 text-xs" aria-label="Role" options={USER_ROLES.map((r) => ({ value: r, label: r }))} />
+                      <Select name="role" defaultValue={u.role} className="h-8 w-32 text-xs" aria-label="Role" options={HUMAN_ROLES.map((r) => ({ value: r, label: r }))} />
                       <SubmitButton size="sm" variant="ghost">
                         Set
                       </SubmitButton>
@@ -350,7 +350,7 @@ async function Users({ ctx }: { ctx: Ctx }) {
             <Input id="upass" name="password" type="password" required minLength={10} autoComplete="new-password" />
           </Field>
           <Field label="Role" htmlFor="urole">
-            <Select id="urole" name="role" defaultValue="operator" options={USER_ROLES.map((r) => ({ value: r, label: r }))} />
+            <Select id="urole" name="role" defaultValue="operator" options={HUMAN_ROLES.map((r) => ({ value: r, label: r }))} />
           </Field>
           <div className="sm:col-span-2">
             <SubmitButton>Add user</SubmitButton>
@@ -367,6 +367,7 @@ async function ApiKeys({ ctx }: { ctx: Ctx }) {
     <div className="space-y-6">
       <Callout title="REST API">
         Send <Mono>Authorization: Bearer forge_…</Mono> to <Mono>/api/v1/*</Mono>. Keys are stored as SHA-256 hashes, carry a role, and are shown only once at creation. See docs/API.md.
+        Give workflow tools such as n8n the <strong>automation</strong> role: it can discover, send in, refresh, score and submit network listings and take broken ones off the storefront, but it cannot approve or publish — no API key can; those need a signed-in person.
       </Callout>
       <Panel title="Keys" bodyClassName="p-0">
         <Table minWidth={760}>
@@ -415,7 +416,7 @@ async function ApiKeys({ ctx }: { ctx: Ctx }) {
             <Input id="kname" name="name" required maxLength={80} placeholder="Zapier / n8n / BI export" />
           </Field>
           <Field label="Role" htmlFor="krole" className="w-40">
-            <Select id="krole" name="role" defaultValue="viewer" options={USER_ROLES.map((r) => ({ value: r, label: r }))} />
+            <Select id="krole" name="role" defaultValue="viewer" options={USER_ROLES.map((r) => ({ value: r, label: r === "automation" ? "automation (n8n)" : r }))} />
           </Field>
           <SubmitButton>Create key</SubmitButton>
         </ActionForm>

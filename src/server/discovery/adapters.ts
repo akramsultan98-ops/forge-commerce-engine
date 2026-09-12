@@ -195,13 +195,16 @@ export const aliexpressAdapter = interfaceAdapter({
 
 export const amazonAdapter = interfaceAdapter({
   key: "AMAZON",
-  label: "Amazon (Product Advertising API)",
+  label: "Amazon Associates (Creators API)",
   kind: "marketplace",
   officialApi: true,
-  docsUrl: "https://webservices.amazon.com/paapi5/documentation/",
-  requirements: ["AMAZON_PAAPI_ACCESS_KEY", "AMAZON_PAAPI_SECRET_KEY", "AMAZON_PARTNER_TAG", "An Associates account in good standing with qualifying sales (Amazon gates API access)"],
-  credentialKeys: ["accessKey", "secretKey", "partnerTag"],
-  notes: "Scraping Amazon violates its terms — FORGE only supports the official API. Check whether your region has migrated to Amazon's successor API.",
+  docsUrl: "https://affiliate-program.amazon.com/creatorsapi/docs",
+  requirements: [
+    "AMAZON_CREATORS_CREDENTIAL_ID, AMAZON_CREATORS_CREDENTIAL_SECRET, AMAZON_CREATORS_CREDENTIAL_VERSION and AMAZON_PARTNER_TAG in the server environment",
+    "An Associates account for the marketplace (Amazon.eg first) with Creators API access — Amazon requires at least 10 qualifying sales in the last 30 days",
+  ],
+  credentialKeys: ["__env__"],
+  notes: "Amazon listings enter Affiliate products (review lifecycle) through the Creators API, not Products directly — see docs/AFFILIATE_PRODUCTS.md. PA-API 5.0 was retired in May 2026. Scraping Amazon is never used.",
 });
 
 export const tiktokShopAdapter = interfaceAdapter({

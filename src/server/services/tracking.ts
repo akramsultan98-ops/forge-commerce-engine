@@ -36,6 +36,10 @@ export interface TrackInput {
   productId?: string | null;
   landingPageId?: string | null;
   affiliateLinkId?: string | null;
+  /** The network listing behind a tracked link (affiliate_products). */
+  affiliateProductId?: string | null;
+  /** Merchant host an outbound redirect went to. */
+  destinationHost?: string | null;
   experimentId?: string | null;
   variant?: string | null;
   visitorId?: string | null;
@@ -79,6 +83,8 @@ export async function recordEvent(db: Database, input: TrackInput): Promise<stri
       productId: input.productId ?? null,
       landingPageId: input.landingPageId ?? null,
       affiliateLinkId: input.affiliateLinkId ?? null,
+      affiliateProductId: input.affiliateProductId ?? null,
+      destinationHost: clip(input.destinationHost, 255),
       campaignId,
       contentId,
       experimentId: input.experimentId ?? null,
@@ -102,9 +108,18 @@ export async function recordEvent(db: Database, input: TrackInput): Promise<stri
   return row.id;
 }
 
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+};
+
 /**
- * Resolves /r/{code}: logs an AFFILIATE_CLICK (with attribution) and returns the destination.
- * Paused/broken links fall back to the product page so visitors never hit a dead end.
+ * Resolves /r/{code}: logs an AFFILIATE_CLICK (an outbound redirect, with attribution, destination
+ * host and network listing) and returns the destination. Paused/broken links fall back to the
+ * product page so visitors never hit a dead end — logged as REDIRECT_FALLBACK.
  */
 export async function handleTrackedRedirect(
   db: Database,
@@ -120,17 +135,11 @@ export async function handleTrackedRedirect(
     .limit(1);
   if (!row) return null;
   const { link, network } = row;
-  if ((link.status === "PAUSED" || link.status === "BROKEN") && row.productSlug) {
-    return { destination: new URL(`/products/${row.productSlug}?unavailable=1`, input.appUrl).toString(), clickId: null };
-  }
-  if (!isSafeRedirectUrl(link.url)) return null;
-  // Affiliate destinations are AFFILIATE_CLICKs; owned-store destinations (Shopify/dropshipping checkout) are PRODUCT_CLICKs.
-  const eventType = network || row.businessModel === "AFFILIATE" ? "AFFILIATE_CLICK" : "PRODUCT_CLICK";
-  const clickId = await recordEvent(db, {
+  const event = {
     orgId: link.organizationId,
-    eventType,
     productId: link.productId,
     affiliateLinkId: link.id,
+    affiliateProductId: link.affiliateProductId,
     experimentId: input.experimentId && /^[0-9a-f-]{36}$/i.test(input.experimentId) ? input.experimentId : null,
     variant: input.variant && /^[a-z0-9_-]{1,20}$/.test(input.variant) ? input.variant : null,
     visitorId: input.visitorId,
@@ -141,7 +150,15 @@ export async function handleTrackedRedirect(
     ip: input.ip,
     userAgent: input.userAgent,
     isDemo: link.isDemo,
-  });
+  };
+  if ((link.status === "PAUSED" || link.status === "BROKEN") && row.productSlug) {
+    await recordEvent(db, { ...event, eventType: "REDIRECT_FALLBACK" });
+    return { destination: new URL(`/products/${row.productSlug}?unavailable=1`, input.appUrl).toString(), clickId: null };
+  }
+  if (!isSafeRedirectUrl(link.url)) return null;
+  // Affiliate destinations are AFFILIATE_CLICKs; owned-store destinations (Shopify/dropshipping checkout) are PRODUCT_CLICKs.
+  const eventType = network || row.businessModel === "AFFILIATE" ? "AFFILIATE_CLICK" : "PRODUCT_CLICK";
+  const clickId = await recordEvent(db, { ...event, eventType, destinationHost: hostOf(link.url) });
   let destination = appendSubId(link.url, network?.subIdParam, clickId);
   if (network?.config && (network.config as { passUtm?: boolean }).passUtm && input.utm.utm_source && input.utm.utm_campaign) {
     destination = buildUtmUrl(destination, { source: input.utm.utm_source, medium: input.utm.utm_medium ?? "organic", campaign: input.utm.utm_campaign, content: input.utm.utm_content });

@@ -13,7 +13,9 @@ Base path: `/api/v1`. All responses are JSON: `{ "data": … }` on success,
 `POST /api/auth/logout` revokes the current session.
 
 **Roles.** viewer: read · operator: products, agents, content, campaigns, affiliate · admin: everything
-incl. settings, integrations, users, API keys. Errors: `401 unauthorized`, `403 forbidden`,
+incl. settings, integrations, users, API keys · automation (API keys only, for n8n): network listings —
+discover, ingest, refresh, score, submit, report failures, take listings off the storefront; never
+approve or publish (those need a signed-in person, whatever an API key's role). Errors: `401 unauthorized`, `403 forbidden`,
 `403 csrf_blocked`, `429 rate_limited` (with `Retry-After`), `400 validation_error` (Zod issues in `details`),
 `412 integration_not_configured` (`details.requirements` lists exactly what is missing),
 `409 demo_mode_blocked`.
@@ -44,6 +46,15 @@ redirects 60/min · webhooks 600/min.
 | `POST /command` `{ input }` | dashboard:read | Natural-language command → result (jobs need agents:run) |
 | `POST /jobs` `{ type, payload? }` | jobs:run | Queue any automation (`analytics_sync`, `recommendations_refresh`, `trend_refresh`, …) |
 | `GET /jobs/{id}` | dashboard:read | Job status/result |
+| `GET /affiliate/providers` | affiliate:read | Affiliate network readiness (missing variable names only) and marketplaces |
+| `POST /affiliate/discover` | affiliate:ingest | `{ network?, marketplace?, keywords, category?, limit?, page? }` → official-API search, stored as DISCOVERED |
+| `GET /affiliate/products?status=&network=&marketplace=&stale=&hasError=&q=&updatedSince=&sort=` · `POST /affiliate/products` | affiliate:read / ingest | Listing queue (with `total`, `publishBlockers`) · ingest `{ items: [...] }` (≤ 100, upsert) |
+| `GET /affiliate/products/{id}` · `PATCH /affiliate/products/{id}` | affiliate:read / ingest | One listing with its storefront product and tracked link · edit FORGE-owned fields `{ revision, … }` (network fields refused; automations only before review) |
+| `POST /affiliate/products/{id}/transition` | per action | `{ action: submit\|approve\|reject\|publish\|unpublish\|archive\|restore, note?, revision? }` — publish creates the storefront product and tracked link; approve/publish need a signed-in person |
+| `POST /affiliate/products/{id}/score` · `POST /affiliate/products/{id}/failure` | affiliate:ingest | Record a score with provenance · report a failure (optionally unpublish) |
+| `POST /affiliate/refresh` | affiliate:ingest | Re-fetch listings older than `olderThanHours` (default 20; Amazon allows 24), published first |
+| `GET /affiliate/failures` · `GET /affiliate/tracking?days=&network=&id=` | affiliate:read | Failure feed for automations · per-listing views, outbound clicks, fallbacks, reported conversions |
+| `POST /affiliate/conversions` | affiliate:ingest | Network-reported conversions per listing (e.g. Amazon earnings reports), idempotent on `source + orderId`. See [AFFILIATE_PRODUCTS.md](AFFILIATE_PRODUCTS.md) |
 
 ### Example
 
@@ -61,7 +72,7 @@ curl -s -X POST http://localhost:3000/api/v1/products/$ID/actions \
 
 | Path | Purpose |
 |---|---|
-| `GET /r/{code}?utm_*&x=&v=` | Tracked outbound redirect. Logs the click (UTMs, A/B experiment `x` + variant `v`), appends the network sub-id (click id), 302s to the merchant. Paused/broken links fall back to the product page |
+| `GET /r/{code}?utm_*&x=&v=` | Tracked outbound redirect. Logs the click (UTMs, A/B experiment `x` + variant `v`, destination host, network listing), appends the network sub-id (click id) when the link's network defines one, 302s to the merchant. Paused/broken links fall back to the product page (logged as `REDIRECT_FALLBACK`) |
 | `POST /api/track` | First-party beacon `{ type, path, productId?, landingPageId?, experimentId?, variant?, utm?, referrer? }` → 204. Bots flagged, IP hashed, visitor id only with consent |
 | `GET /api/health` | Liveness + DB + queue |
 | `GET /sitemap.xml`, `/robots.txt` | SEO |

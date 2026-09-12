@@ -2,8 +2,9 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type 
 import { z } from "zod";
 import { BUSINESS_MODELS, CURRENCIES, PRODUCT_STATUSES, type ProductStatus, type Provenance, type SourceAdapterKey } from "@/lib/constants";
 import { slugify } from "@/lib/utils";
+import { PROVIDER_OWNED_PRODUCT_FIELDS } from "@/domain/affiliate-products";
 import { assertCan, type ServiceContext } from "../context";
-import { categories, productStores, productTests, products, suppliers, type FieldProvenance, type NewProduct, type Product } from "../db/schema";
+import { affiliateProducts, categories, productStores, productTests, products, suppliers, type FieldProvenance, type NewProduct, type Product } from "../db/schema";
 import { audit } from "../audit";
 import { NotFoundError, ValidationError } from "../errors";
 
@@ -117,7 +118,7 @@ function provenanceFor(values: Record<string, unknown>, provenance: Provenance, 
   return out;
 }
 
-async function uniqueSlug(ctx: ServiceContext, base: string, excludeId?: string): Promise<string> {
+export async function uniqueSlug(ctx: ServiceContext, base: string, excludeId?: string): Promise<string> {
   const root = slugify(base);
   for (let i = 0; i < 50; i++) {
     const candidate = i === 0 ? root : `${root}-${i + 1}`;
@@ -169,19 +170,44 @@ export async function createProduct(ctx: ServiceContext, raw: unknown, opts: Cre
   return row;
 }
 
+/** The network listing a storefront product is published from, if any (see affiliate_products.product_id). */
+export async function networkListingFor(ctx: Pick<ServiceContext, "db" | "orgId">, productId: string) {
+  const [row] = await ctx.db
+    .select({ id: affiliateProducts.id, network: affiliateProducts.network, marketplace: affiliateProducts.marketplace, externalId: affiliateProducts.externalId, status: affiliateProducts.status })
+    .from(affiliateProducts)
+    .where(and(eq(affiliateProducts.productId, productId), eq(affiliateProducts.organizationId, ctx.orgId)))
+    .limit(1);
+  return row ?? null;
+}
+
+/** Refuses changes to fields a network listing supplies — they are rewritten from the listing on every refresh. */
+async function assertNotProviderOwned(ctx: Pick<ServiceContext, "db" | "orgId">, productId: string, fields: string[]) {
+  const locked = fields.filter((k) => (PROVIDER_OWNED_PRODUCT_FIELDS as readonly string[]).includes(k));
+  if (!locked.length) return;
+  const listing = await networkListingFor(ctx, productId);
+  if (!listing) return;
+  throw new ValidationError(
+    `This product is published from a network listing (${listing.network}) — ${locked.join(", ")} ${locked.length === 1 ? "comes" : "come"} from the network and ${locked.length === 1 ? "updates" : "update"} on refresh. Edit the listing's FORGE fields instead.`,
+    locked.map((k) => ({ path: [k], message: "supplied by the network listing" })),
+  );
+}
+
 export async function updateProduct(ctx: ServiceContext, id: string, raw: unknown, provenance: Provenance = "MANUAL", sourceLabel = "operator"): Promise<Product> {
   assertCan(ctx, "products:write");
   const existing = await getProduct(ctx, id);
   const parsed = ProductInputSchema.partial().safeParse(raw);
   if (!parsed.success) throw new ValidationError("Invalid product update", parsed.error.issues);
-  const patch = Object.fromEntries(Object.entries(parsed.data).filter(([, v]) => v !== undefined)) as Partial<NewProduct>;
-  if (patch.title && patch.title !== existing.title) patch.slug = await uniqueSlug(ctx, patch.title, id);
-  if (patch.businessModel) patch.businessModels = Array.from(new Set([...(existing.businessModels ?? []), patch.businessModel]));
+  // Only the fields the caller sent: zod fills in defaults (currency, business model) even for omitted
+  // keys, and those must not overwrite the product on a partial update.
+  const sent = new Set(raw && typeof raw === "object" ? Object.keys(raw) : []);
+  const data = Object.fromEntries(Object.entries(parsed.data).filter(([k, v]) => v !== undefined && sent.has(k)));
   // Only fields whose value actually changed get the new provenance — re-saving a form must not
   // relabel live or demo data as operator input.
-  const changed = Object.fromEntries(
-    Object.entries(parsed.data).filter(([k, v]) => v !== undefined && JSON.stringify(v ?? null) !== JSON.stringify((existing as Record<string, unknown>)[k] ?? null)),
-  );
+  const changed = Object.fromEntries(Object.entries(data).filter(([k, v]) => JSON.stringify(v ?? null) !== JSON.stringify((existing as Record<string, unknown>)[k] ?? null)));
+  await assertNotProviderOwned(ctx, id, Object.keys(changed));
+  const patch = { ...data } as Partial<NewProduct>;
+  if (patch.title && patch.title !== existing.title) patch.slug = await uniqueSlug(ctx, patch.title, id);
+  if (patch.businessModel) patch.businessModels = Array.from(new Set([...(existing.businessModels ?? []), patch.businessModel]));
   patch.fieldProvenance = provenanceFor(changed, provenance, sourceLabel, existing.fieldProvenance);
   patch.estimatedMargin = computeEstimatedMargin({ ...existing, ...patch } as Product);
   const [row] = await ctx.db
@@ -189,7 +215,7 @@ export async function updateProduct(ctx: ServiceContext, id: string, raw: unknow
     .set(patch)
     .where(and(eq(products.id, id), eq(products.organizationId, ctx.orgId)))
     .returning();
-  await audit(ctx, "product.update", { type: "product", id }, { fields: Object.keys(parsed.data) });
+  await audit(ctx, "product.update", { type: "product", id }, { fields: Object.keys(data) });
   return row;
 }
 
@@ -198,7 +224,10 @@ export async function applyProductFacts(ctx: ServiceContext, id: string, facts: 
   const existing = await getProduct(ctx, id);
   const rank: Record<Provenance, number> = { REAL: 5, MANUAL: 4, ESTIMATED: 3, AI_INFERENCE: 2, DEMO: 1 };
   const allowed: Record<string, unknown> = {};
+  const fromListing = (await networkListingFor(ctx, id)) !== null;
   for (const [k, v] of Object.entries(facts)) {
+    // A network listing owns these fields on products published from it.
+    if (fromListing && (PROVIDER_OWNED_PRODUCT_FIELDS as readonly string[]).includes(k)) continue;
     const current = existing.fieldProvenance?.[k];
     const currentValue = (existing as Record<string, unknown>)[k];
     // Never let a weaker source (e.g. AI inference) overwrite stronger data (real/manual).

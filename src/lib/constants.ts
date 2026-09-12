@@ -1,8 +1,14 @@
 // Client-safe domain constants. The database enums are generated from these tuples,
 // so this file is the single source of truth for every status / type vocabulary.
 
-export const USER_ROLES = ["admin", "operator", "viewer"] as const;
+/**
+ * `automation` is a machine role for API keys (n8n and other workflows): it can discover, ingest,
+ * refresh, score and submit network listings, but never approve or publish them. People get one of
+ * HUMAN_ROLES.
+ */
+export const USER_ROLES = ["admin", "operator", "viewer", "automation"] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+export const HUMAN_ROLES = ["admin", "operator", "viewer"] as const satisfies readonly UserRole[];
 
 export const PRODUCT_STATUSES = [
   "DISCOVERED",
@@ -134,6 +140,8 @@ export const EVENT_TYPES = [
   "CHECKOUT",
   "SOCIAL_CLICK",
   "NEWSLETTER_SIGNUP",
+  // A tracked-link click that could not be sent to the merchant (link paused/broken, listing unpublished).
+  "REDIRECT_FALLBACK",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -207,6 +215,17 @@ export const AFFILIATE_NETWORK_TYPES = [
 ] as const;
 export type AffiliateNetworkType = (typeof AFFILIATE_NETWORK_TYPES)[number];
 
+/**
+ * Review lifecycle of a network product listing (affiliate_products) — separate from the research /
+ * testing lifecycle of FORGE products: DISCOVERED → REVIEW → APPROVED → PUBLISHED → ARCHIVED, with
+ * REJECTED from review and restore back to REVIEW. Transitions live in src/domain/affiliate-products.ts.
+ */
+export const AFFILIATE_PRODUCT_STATUSES = ["DISCOVERED", "REVIEW", "APPROVED", "PUBLISHED", "REJECTED", "ARCHIVED"] as const;
+export type AffiliateProductStatus = (typeof AFFILIATE_PRODUCT_STATUSES)[number];
+
+export const AFFILIATE_AVAILABILITY = ["IN_STOCK", "OUT_OF_STOCK", "PREORDER", "BACKORDER", "UNKNOWN"] as const;
+export type AffiliateAvailability = (typeof AFFILIATE_AVAILABILITY)[number];
+
 export const INTEGRATION_KINDS = [
   "SHOPIFY",
   "TIKTOK",
@@ -265,5 +284,6 @@ export const JOB_TYPES = [
   "test_evaluation",
   "launch_test_kit",
   "first_run",
+  "affiliate_refresh",
 ] as const;
 export type JobType = (typeof JOB_TYPES)[number];

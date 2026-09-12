@@ -19,6 +19,7 @@ import {
   Megaphone,
   Menu,
   Package,
+  PackageSearch,
   PanelsTopLeft,
   ScrollText,
   Settings,
@@ -50,6 +51,7 @@ const GROUPS: Array<{ key: string; items: NavItem[] }> = [
     key: "groupCatalog",
     items: [
       { href: "/admin/products", key: "products", icon: Package, exact: true },
+      { href: "/admin/affiliate-products", key: "listings", icon: PackageSearch },
       { href: "/admin/products/discover", key: "discover", icon: Compass },
       { href: "/admin/products/testing", key: "testing", icon: FlaskConical },
       { href: "/admin/products/winners", key: "winners", icon: Trophy },

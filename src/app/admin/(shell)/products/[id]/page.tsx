@@ -14,7 +14,8 @@ import type { ServiceContext } from "@/server/context";
 import { env } from "@/server/env";
 import { resolveEngine } from "@/server/ai/service";
 import { affiliateNetworks, content, productDecisions, productResearch, productTests, type Product, type ProductScore } from "@/server/db/schema";
-import { getProductWithRelations } from "@/server/services/products";
+import { getProductWithRelations, networkListingFor } from "@/server/services/products";
+import { PROVIDER_OWNED_PRODUCT_FIELDS } from "@/domain/affiliate-products";
 import { latestScore, scoreHistory } from "@/server/services/scoring";
 import { listCategories } from "@/server/services/catalog";
 import { listLandingPages } from "@/server/services/landing-pages";
@@ -78,7 +79,10 @@ function FactorBreakdown({ score }: { score: ProductScore | null }) {
   );
 }
 
-async function OverviewTab({ ctx, p, score, canWrite }: { ctx: ServiceContext; p: Product; score: ProductScore | null; canWrite: boolean }) {
+/** On a product published from a network listing: network fields plus the FORGE fields that live on the listing. */
+const LISTING_LOCKED = [...PROVIDER_OWNED_PRODUCT_FIELDS, "categoryId", "problemSolved", "targetAudience", "tags", "commissionPercentage"];
+
+async function OverviewTab({ ctx, p, score, canWrite, listing }: { ctx: ServiceContext; p: Product; score: ProductScore | null; canWrite: boolean; listing: Awaited<ReturnType<typeof networkListingFor>> }) {
   const [categories, history, decisions] = await Promise.all([listCategories(ctx), scoreHistory(ctx, p.id, 12), ctx.db.select().from(productDecisions).where(eq(productDecisions.productId, p.id)).orderBy(desc(productDecisions.createdAt)).limit(5)]);
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -88,7 +92,16 @@ async function OverviewTab({ ctx, p, score, canWrite }: { ctx: ServiceContext; p
         </Panel>
         {canWrite && (
           <Panel title="Product facts" subtitle="Edit what you know — FORGE re-scores on save">
-            <ProductForm action={updateProductAction} product={p} categories={categories} submitLabel="Save & re-score" />
+            {listing && (
+              <Callout className="mb-5" title={`Published from a network listing (${listing.network.replace(/_/g, " ").toLowerCase()} · ${listing.externalId})`}>
+                Title, price, images, links and the other network fields — and this product&apos;s FORGE fields — are managed on{" "}
+                <Link href={`/admin/affiliate-products/${listing.id}`} className="text-fog underline decoration-edge-2 underline-offset-4">
+                  the listing
+                </Link>
+                . They are locked here and update when the listing is refreshed.
+              </Callout>
+            )}
+            <ProductForm action={updateProductAction} product={p} categories={categories} submitLabel="Save & re-score" locked={listing ? LISTING_LOCKED : []} />
           </Panel>
         )}
       </div>
@@ -825,10 +838,11 @@ export default async function ProductCommandCenter({ params, searchParams }: { p
     notFound();
   }
   const { product: p, category, supplier } = data;
-  const [score, runningTest, shopify] = await Promise.all([
+  const [score, runningTest, shopify, listing] = await Promise.all([
     latestScore(ctx, p.id),
     ctx.db.select().from(productTests).where(and(eq(productTests.productId, p.id), eq(productTests.status, "RUNNING"))).limit(1),
     getShopifyConnection(ctx),
+    networkListingFor(ctx, p.id),
   ]);
   const canWrite = can(ctx.role, "products:write");
   const canRun = can(ctx.role, "agents:run");
@@ -940,7 +954,7 @@ export default async function ProductCommandCenter({ params, searchParams }: { p
 
       <Tabs items={TABS.map((t) => ({ href: `/admin/products/${p.id}?tab=${t}`, label: t[0].toUpperCase() + t.slice(1), active: t === tab }))} />
       <div className="mt-6">
-        {tab === "overview" && <OverviewTab ctx={ctx} p={p} score={score} canWrite={canWrite} />}
+        {tab === "overview" && <OverviewTab ctx={ctx} p={p} score={score} canWrite={canWrite} listing={listing} />}
         {tab === "research" && <ResearchTab ctx={ctx} p={p} canRun={canRun} />}
         {tab === "content" && <ContentTab ctx={ctx} p={p} canRun={canRun} />}
         {tab === "landing" && <LandingTab ctx={ctx} p={p} canRun={canRun} />}

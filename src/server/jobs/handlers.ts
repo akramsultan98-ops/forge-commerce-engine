@@ -6,6 +6,7 @@ import { analyticsAgent, contentAgent, landingPageAgent, optimizationAgent, repo
 import { orchestrator } from "../agents/orchestrator";
 import { runAgent } from "../agents/runtime";
 import { checkAllLinks } from "../services/affiliate";
+import { refreshAffiliateProducts } from "../services/affiliate-products";
 import { dispatchNotification } from "../services/notifications";
 import { refreshRecommendations } from "../services/recommendations";
 import { evaluateAllTests } from "../services/testing";
@@ -34,6 +35,8 @@ export const JOB_HANDLERS: Record<JobType, Handler> = {
   test_evaluation: (ctx) => evaluateAllTests(ctx).then(async (r) => ({ ...r, recommendations: await refreshRecommendations(ctx) })),
   launch_test_kit: (ctx, p) => runAgent(ctx, orchestrator, { pipeline: "launch_test_kit", productId: String(p.productId), contentBatch: p.batch === "full" ? "full" : "launch" }, { productId: str(p.productId) }).then((r) => r.output),
   first_run: (ctx, p) => runAgent(ctx, orchestrator, { pipeline: "first_run", launchTop: num(p.launchTop) }).then((r) => r.output),
+  // Networks that are not configured are skipped (reported in the result), not failed.
+  affiliate_refresh: (ctx, p) => refreshAffiliateProducts(ctx, { olderThanHours: num(p.olderThanHours), limit: num(p.limit) }),
 };
 
 export const JOB_LABELS: Record<JobType, string> = {
@@ -52,4 +55,5 @@ export const JOB_LABELS: Record<JobType, string> = {
   test_evaluation: "Evaluate product tests",
   launch_test_kit: "Launch test kit",
   first_run: "First-run discovery workflow",
+  affiliate_refresh: "Refresh network listings",
 };

@@ -163,6 +163,7 @@ export const ar: Messages = {
       dashboard: "لوحة التحكم",
       command: "مركز الأوامر",
       products: "المنتجات",
+      listings: "منتجات الشبكات",
       discover: "الاكتشاف",
       testing: "الاختبارات",
       winners: "الرابحون",

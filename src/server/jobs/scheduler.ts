@@ -19,6 +19,13 @@ export const DEFAULT_SCHEDULES: Array<{ key: string; jobType: JobType; cron: str
   { key: "daily_test_evaluation", jobType: "test_evaluation", cron: "0 9 * * *", description: "Daily: evaluate running product tests" },
   { key: "hourly_analytics", jobType: "analytics_sync", cron: "15 * * * *", description: "Hourly: roll up analytics, detect spikes" },
   { key: "shopify_sync", jobType: "shopify_sync", cron: "0 */6 * * *", description: "Every 6h: sync Shopify orders (when connected)" },
+  {
+    key: "affiliate_refresh",
+    jobType: "affiliate_refresh",
+    cron: "10 */2 * * *",
+    description: "Every 2h: refresh network listings older than 20 h (Amazon data may be shown for at most 24 h)",
+    payload: { olderThanHours: 20, limit: 200 },
+  },
 ];
 
 export async function ensureDefaultSchedules(db: Database, orgId: string) {
