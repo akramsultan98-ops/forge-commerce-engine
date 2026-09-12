@@ -21,6 +21,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   serverExternalPackages: ["@electric-sql/pglite", "pg"],
+  // The embedded database (PGlite) migrates itself at boot from ./drizzle — ship the SQL files with
+  // every server function (Vercel) and the standalone output. Harmless for PostgreSQL deployments.
+  outputFileTracingIncludes: { "/*": ["./drizzle/**/*"] },
   images: {
     remotePatterns: imageHosts.map((hostname) => ({ protocol: "https" as const, hostname })),
   },

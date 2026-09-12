@@ -27,7 +27,8 @@ worker) with `DEMO_MODE=true`; typecheck, lint, 171 tests and the production bui
 
 Next milestone: UI polish · product images · real integrations tested against live accounts ·
 live credentials · production deployment · domain and HTTPS. Details and the full ledger:
-[docs/STATUS.md](docs/STATUS.md).
+[docs/STATUS.md](docs/STATUS.md). A demo-only Vercel Preview (no database, no credentials) is
+described in [docs/VERCEL_PREVIEW.md](docs/VERCEL_PREVIEW.md).
 
 ---
 

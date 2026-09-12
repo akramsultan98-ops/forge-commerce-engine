@@ -13,6 +13,8 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
   DEMO_MODE: bool.default(true),
+  /** Ephemeral previews (embedded PGlite, e.g. pglite://memory on Vercel): load the labelled demo data at boot. Requires DEMO_MODE. */
+  DEMO_SEED_ON_BOOT: bool.default(false),
   DATABASE_URL: z.string().min(1).default("pglite://./.data/pglite"),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   AUTH_SECRET: z.string().default(""),
@@ -90,6 +92,12 @@ export function env(): Env {
   if (cached) return cached;
   const raw: Record<string, string | undefined> = {};
   for (const [k, v] of Object.entries(process.env)) raw[k] = v === "" ? undefined : v;
+  // On Vercel, APP_URL defaults to the deployment's own https URL: the stable branch URL for
+  // previews, the production URL for production. An explicit APP_URL always wins.
+  if (!raw.APP_URL && raw.VERCEL === "1") {
+    const host = raw.VERCEL_ENV === "production" ? raw.VERCEL_PROJECT_PRODUCTION_URL : (raw.VERCEL_BRANCH_URL ?? raw.VERCEL_URL);
+    if (host) raw.APP_URL = `https://${host}`;
+  }
   const parsed = EnvSchema.safeParse(raw);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
