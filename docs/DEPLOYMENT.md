@@ -34,7 +34,7 @@ docker compose logs -f app worker
 ## Production checklist
 
 - [ ] `DEMO_MODE=false` (otherwise all outbound actions stay blocked by design)
-- [ ] `AUTH_SECRET`, `ENCRYPTION_KEY` — 32 random bytes each; the app refuses to start without them
+- [ ] `AUTH_SECRET`, `ENCRYPTION_KEY` — two *different* strong random values, ≥ 32 characters, no quotes or spaces (`node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`, run twice); the app refuses to start otherwise and names the variable and the reason
 - [ ] `APP_URL=https://…` (enables `Secure` cookies and correct OAuth/postback URLs; Shopify only delivers webhooks over HTTPS)
 - [ ] `TRUSTED_PROXIES` = the reverse proxy's address only — otherwise every request appears to come from the proxy and per-IP rate limits share one bucket; never list ranges clients can reach from
 - [ ] `DATABASE_URL` to managed PostgreSQL with TLS, a least-privilege role (no superuser)

@@ -85,6 +85,27 @@ const EnvSchema = z.object({
 
 export type Env = z.infer<typeof EnvSchema>;
 
+/**
+ * Secrets required whenever NODE_ENV=production (DEMO_MODE does not relax this). Any strong random
+ * string works: a base64 value that decodes to exactly 32 bytes is used as the key as-is, anything
+ * else is stretched with SHA-256 (see security/crypto.ts).
+ */
+export const PRODUCTION_SECRETS = ["AUTH_SECRET", "ENCRYPTION_KEY"] as const;
+export const MIN_SECRET_LENGTH = 32;
+const MIN_DISTINCT_CHARS = 12;
+const SECRET_HELP = `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`;
+
+/** Why a production secret is unusable, or null if it is acceptable. Never echoes the value. */
+export function secretProblem(value: string | undefined): string | null {
+  if (!value) return "is not set";
+  if (value.trim() !== value) return "has leading or trailing whitespace (paste the raw value)";
+  if (/^["'`]|["'`]$/.test(value)) return "is wrapped in quotes (paste the value without quotes)";
+  if (/^(replace-with|build-stage-placeholder|change-?me)/i.test(value)) return "is still a placeholder";
+  if (value.length < MIN_SECRET_LENGTH) return `is too short (${value.length} characters; at least ${MIN_SECRET_LENGTH} required)`;
+  if (new Set(value).size < MIN_DISTINCT_CHARS) return "does not look random (too few distinct characters)";
+  return null;
+}
+
 let cached: Env | null = null;
 
 /** Parsed, validated environment. Empty strings are treated as "not configured". */
@@ -105,9 +126,19 @@ export function env(): Env {
   }
   const e = parsed.data;
   if (e.NODE_ENV === "production") {
-    const weak = (s: string) => s.length < 32 || s.startsWith("replace-with");
-    if (weak(e.AUTH_SECRET)) throw new Error("AUTH_SECRET must be set to a strong random value in production.");
-    if (weak(e.ENCRYPTION_KEY)) throw new Error("ENCRYPTION_KEY must be set to a strong random value in production.");
+    // Checked on the first env() call at runtime (the instrumentation hook at server start); `next build`
+    // does not call env(). Every problem is reported at once, by variable name, never with its value.
+    const problems = PRODUCTION_SECRETS.flatMap((name) => {
+      const problem = secretProblem(e[name]);
+      return problem ? [`${name} ${problem}`] : [];
+    });
+    if (!problems.length && e.AUTH_SECRET === e.ENCRYPTION_KEY) problems.push("AUTH_SECRET and ENCRYPTION_KEY must be different values");
+    if (problems.length) {
+      const onVercel = raw.VERCEL === "1";
+      const where = onVercel ? ` (Vercel environment: ${raw.VERCEL_ENV ?? "unknown"})` : "";
+      const fix = onVercel ? " Set them for this deployment's environment in Vercel, then redeploy — existing deployments keep the variables they were created with." : "";
+      throw new Error(`Invalid production configuration${where}: ${problems.join("; ")}. Generate each value separately with ${SECRET_HELP}.${fix}`);
+    }
   }
   cached = e;
   return e;

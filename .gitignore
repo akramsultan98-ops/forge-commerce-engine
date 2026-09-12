@@ -24,6 +24,8 @@ blob-report/
 .env
 .env.*
 !.env.example
+# local secret notes (keep secrets in a password manager, not in the repo folder)
+*[Ss]ecret*.txt
 
 # logs
 *.log

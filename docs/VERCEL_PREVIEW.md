@@ -15,7 +15,7 @@ FORGE builds and runs on Vercel as a standard Next.js app. Verified locally with
 | Cold start | ~11 s: in-memory PostgreSQL migrated in ~4 s, labelled demo data seeded in ~7 s (20 products, ~16k events) |
 | Route crawl (signed in) | 67/67 admin + storefront routes render |
 | Playwright E2E (desktop + mobile) | 10/10 |
-| Same build with **no** variables (what an unconfigured Production deployment does) | Every route returns `500` — `AUTH_SECRET must be set` — no data, no setup page |
+| Same build with **no** variables (what an unconfigured Production deployment does) | Every route returns `500` — `Invalid production configuration: AUTH_SECRET is not set; ENCRYPTION_KEY is not set` — no data, no setup page |
 
 It has not been deployed to Vercel itself yet; the differences to expect are listed under limitations.
 
@@ -70,9 +70,25 @@ as *Sensitive*.
 | `ENCRYPTION_KEY` | new random value, preview-only | Required when `NODE_ENV=production` |
 | `TRENDS_WIKIPEDIA_ENABLED` | `false` | Recommended: no outbound calls at all |
 
-Generate each secret with
-`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`. Never reuse the values
-from your local `.env`.
+Generate each secret separately (run it twice — the two values must differ) with
+`node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Each must be at least
+32 characters, pasted without quotes or spaces. Never reuse the values from your local `.env`.
+
+### If a deployment fails with "Invalid production configuration"
+
+The message names each invalid variable, the reason (not set, placeholder, too short, quoted, spaces,
+not random, identical) and, on Vercel, the environment the deployment runs in. Check, in order:
+
+1. **Environment** — the variable must be ticked for the environment shown in the message
+   (`production` or `preview`). A deployment's environment is shown on its page in Deployments.
+2. **Redeploy** — variables are fixed when a deployment is created; after adding or changing one,
+   create a new deployment (push a commit, or Deployments → ⋯ → Redeploy). The old one keeps failing.
+3. **Value** — a newly generated value, not the `.env.example` placeholder (watch for variables
+   brought in through "Import .env"), without quotes, and different for the two secrets.
+
+If you deploy to **Production** instead of Preview, all seven variables above must be set for
+Production; otherwise the next failure is the default file-backed `DATABASE_URL` on Vercel's read-only
+filesystem.
 
 **Do not add** anything else. In particular, do not use "Import .env" with the ~57 detected variables:
 
